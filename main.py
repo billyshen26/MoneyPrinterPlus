@@ -46,7 +46,7 @@ from services.llm.tongyi_service import MyTongyiService
 from services.resource.pexels_service import PexelsService
 from services.resource.pixabay_service import PixabayService
 from services.sd.sd_service import SDService
-from services.video.merge_service import merge_get_video_list, VideoMergeService, merge_generate_subtitle
+from services.video.merge_service import merge_get_video_list, VideoMergeService, merge_generate_subtitle, get_all_videos_from_folder
 from services.video.video_service import get_audio_duration, VideoService, VideoMixService
 from tools.tr_utils import tr
 from tools.utils import random_with_system_time, get_must_session_option, extent_audio
@@ -429,6 +429,33 @@ def main_generate_ai_video_for_merge(video_generator):
             video_scene_video_list = video_service.normalize_video()
             st.write(tr("Generate Video subtitles..."))
             merge_generate_subtitle(video_scene_video_list, video_scene_text_list)
+            st.write(tr("Generate Video..."))
+            video_file = video_service.generate_video_with_bg_music()
+            print("final file:", video_file)
+
+            st.session_state["result_video_file"] = video_file
+            status.update(label=tr("Generate Video completed!"), state="complete", expanded=False)
+
+
+def main_generate_simple_merge(video_generator):
+    print("main_generate_simple_merge begin:")
+    video_folder = st.session_state.get("simple_merge_video_folder")
+    if not video_folder:
+        st.error(tr("Please input video folder path"))
+        return
+
+    video_list = get_all_videos_from_folder(video_folder)
+    if not video_list:
+        st.error(tr("No video files found in the folder"))
+        return
+
+    with video_generator:
+        st_area = st.status(tr("Generate Video in process..."), expanded=True)
+        with st_area as status:
+            st.write(tr("Video normalize..."))
+            video_service = VideoMergeService(video_list)
+            print("normalize video")
+            video_list = video_service.normalize_video()
             st.write(tr("Generate Video..."))
             video_file = video_service.generate_video_with_bg_music()
             print("final file:", video_file)

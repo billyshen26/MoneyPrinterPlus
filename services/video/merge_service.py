@@ -142,10 +142,25 @@ def random_video_from_dir(video_dir):
     video_files = [os.path.join(video_dir, f) for f in media_files if f.lower().endswith(('.mp4', '.mov'))]
     if video_files:
         # 从视频文件中随机选择一个
-        random_video = random.choice(video_files)
-    else:
-        random_video = random.choice(media_files)
-    return random_video
+        return random.choice(video_files)
+
+    # 如果没有视频文件，返回随机选择的图片
+    return random.choice(media_files) if media_files else None
+
+
+def get_all_videos_from_folder(video_folder):
+    """获取文件夹中所有视频文件，按文件名排序"""
+    if not video_folder or not os.path.exists(video_folder):
+        return []
+
+    video_extensions = ('.mp4', '.mov', '.avi', '.mkv', '.flv', '.wmv', '.webm')
+    video_files = [
+        os.path.join(video_folder, f)
+        for f in os.listdir(video_folder)
+        if f.lower().endswith(video_extensions)
+    ]
+    video_files.sort()
+    return video_files
 
 
 class VideoMergeService:

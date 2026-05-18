@@ -394,5 +394,5 @@ with video_generator:
     st.button(label=tr("Generate Video Button"), type="primary", on_click=generate_video_for_mix,
               args=(video_generator,))
 result_video_file = st.session_state.get("result_video_file")
-if result_video_file:
+if result_video_file and os.path.exists(result_video_file):
     st.video(result_video_file)
