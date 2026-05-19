@@ -128,11 +128,21 @@ def douyin_publisher(driver, video_file, text_file):
         time.sleep(1)
 
     # 设置是否允许他人保存视频
-    not_allow_save_label = driver.find_element(By.XPATH, '//*[@id="root"]/div/div/div[1]/div[11]/div/label[2]') 
-    not_allow_save_label.click()   
-    time.sleep(2)
-    # 发布 
-    publish_button = driver.find_element(By.XPATH, '//button[text()="发布"]')
+    try:
+        save_switch = driver.find_element(By.CSS_SELECTOR, 'input.dy-creator-content-switch-native-control')
+        is_checked = save_switch.get_attribute('aria-checked')
+        if is_checked == 'false':
+            save_switch.click()
+        time.sleep(1)
+    except Exception:
+        try:
+            save_switch = driver.find_element(By.XPATH, '//input[@role="switch" and contains(@class, "dy-creator-content-switch")]')
+            save_switch.click()
+            time.sleep(1)
+        except Exception:
+            pass
+    # 发布
+    publish_button = driver.find_element(By.CSS_SELECTOR, 'button.button-dhlUZE.primary-cECiOJ')
     auto_publish = st.session_state.get('video_publish_auto_publish')
     if auto_publish:
         print("auto publish")
