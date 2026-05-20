@@ -55,8 +55,8 @@ def kuaishou_publisher(driver, video_file, text_file):
     file_input = driver.find_element(By.XPATH,'//input[@type="file"]')
     file_input.send_keys(video_file)
     time.sleep(10)  # 等待
-    # 等待视频上传完毕
-    wait.until(EC.presence_of_element_located((By.XPATH, '//div[contains(@placeholder, "添加合适的话题和描述")]')))
+    # 等待视频上传完毕 - 快手新页面使用 id="work-description-edit"
+    wait.until(EC.presence_of_element_located((By.XPATH, '//div[@id="work-description-edit"]')))
 
     # 设置标题
     use_common = st.session_state.get('video_publish_use_common_config')
@@ -65,8 +65,8 @@ def kuaishou_publisher(driver, video_file, text_file):
     else:
         common_title = st.session_state.get('video_publish_kuaishou_title_prefix')
 
-    # 设置内容
-    content = driver.find_element(By.XPATH, '//div[contains(@placeholder, "添加合适的话题和描述")]')
+    # 设置内容 - 使用新的 id 定位
+    content = driver.find_element(By.XPATH, '//div[@id="work-description-edit"]')
     content.click()
     time.sleep(2)
     cmd_ctrl = Keys.COMMAND if sys.platform == 'darwin' else Keys.CONTROL
@@ -99,57 +99,70 @@ def kuaishou_publisher(driver, video_file, text_file):
         time.sleep(2)
         i=i+1
 
-    # 设置合集
-    if use_common:
-        collection = st.session_state.get('video_publish_collection_name')
-    else:
-        collection = st.session_state.get('video_publish_kuaishou_collection_name')
-    if collection:
-        collection_tag = driver.find_element(By.XPATH, '//span[contains(text(),"选择要加入到的合集")]')
-        actions = ActionChains(driver)
-        actions.move_to_element(collection_tag).click().perform()
-        # collection_tag.click()
-        time.sleep(1)
-        collection_to_select = driver.find_element(By.XPATH, f'//div[@label="{collection}"]')
-        collection_to_select.click()
-        time.sleep(1)
+    # 设置合集（新版页面可能没有此功能）
+    try:
+        if use_common:
+            collection = st.session_state.get('video_publish_collection_name')
+        else:
+            collection = st.session_state.get('video_publish_kuaishou_collection_name')
+        if collection:
+            collection_tag = driver.find_element(By.XPATH, '//span[contains(text(),"选择要加入到的合集")]')
+            actions = ActionChains(driver)
+            actions.move_to_element(collection_tag).click().perform()
+            time.sleep(1)
+            collection_to_select = driver.find_element(By.XPATH, f'//div[@label="{collection}"]')
+            collection_to_select.click()
+            time.sleep(1)
+    except Exception:
+        print("合集设置功能不可用或已在新版页面中移除")
 
-    # 设置分区
-    domain =  st.session_state.get('video_publish_enable_kuaishou_domain')
-    if domain:
-        print("设置领域")
-        domain_tag = driver.find_element(By.XPATH, '//span[contains(text(),"请选择")]')
-        actions = ActionChains(driver)
-        actions.move_to_element(domain_tag).click().perform()
-        # domain_tag.click()
-        time.sleep(1)
-        domain_level1 = st.session_state.get('video_publish_kuaishou_domain_level1')
-        domain_level_1 =driver.find_element(By.XPATH, f'//div[@title="{domain_level1}"]')
-        actions = ActionChains(driver)
-        actions.move_to_element(domain_level_1).click().perform()
-        # domain_level_1.click()
-        time.sleep(1)
+    # 设置分区（新版页面可能没有此功能）
+    try:
+        domain = st.session_state.get('video_publish_enable_kuaishou_domain')
+        if domain:
+            print("设置领域")
+            domain_tag = driver.find_element(By.XPATH, '//span[contains(text(),"请选择")]')
+            actions = ActionChains(driver)
+            actions.move_to_element(domain_tag).click().perform()
+            time.sleep(1)
+            domain_level1 = st.session_state.get('video_publish_kuaishou_domain_level1')
+            domain_level_1 = driver.find_element(By.XPATH, f'//div[@title="{domain_level1}"]')
+            actions = ActionChains(driver)
+            actions.move_to_element(domain_level_1).click().perform()
+            time.sleep(1)
 
-        domain_level2 = st.session_state.get('video_publish_kuaishou_domain_level2')
-        domain_level2_tag = driver.find_element(By.XPATH, '//span[contains(text(),"请选择")]')
-        actions = ActionChains(driver)
-        actions.move_to_element(domain_level2_tag).click().perform()
-        # domain_level2_tag.click()
-        time.sleep(1)
+            domain_level2 = st.session_state.get('video_publish_kuaishou_domain_level2')
+            domain_level2_tag = driver.find_element(By.XPATH, '//span[contains(text(),"请选择")]')
+            actions = ActionChains(driver)
+            actions.move_to_element(domain_level2_tag).click().perform()
+            time.sleep(1)
 
-        domain_level_2 = driver.find_element(By.XPATH, f'//div[@title="{domain_level2}"]')
-        actions = ActionChains(driver)
-        actions.move_to_element(domain_level_2).click().perform()
-        # domain_level_2.click()
-        time.sleep(1)
+            domain_level_2 = driver.find_element(By.XPATH, f'//div[@title="{domain_level2}"]')
+            actions = ActionChains(driver)
+            actions.move_to_element(domain_level_2).click().perform()
+            time.sleep(1)
+    except Exception:
+        print("分区设置功能不可用或已在新版页面中移除")
     
-    # 设置是否允许他人保存视频
-    allow_save_label = driver.find_element(By.XPATH, '//*[@id="setting-tours"]/div[2]/div/label[2]') 
-    allow_save_label.click()   
+    # 设置是否允许他人保存视频（新版页面使用 checkbox）
+    try:
+        # 查找"允许下载此作品" checkbox 并取消勾选
+        download_checkbox = driver.find_element(By.XPATH, '//input[@value="downloadType"]/ancestor::label')
+        actions = ActionChains(driver)
+        actions.move_to_element(download_checkbox).click().perform()
+        time.sleep(1)
+    except Exception:
+        print("下载权限设置不可用")
+
     time.sleep(2)
     
-    # 发布 
-    publish_button = driver.find_element(By.CLASS_NAME, '_button-primary_si04s_60')
+    # 发布 - 定位底部按钮区域的"发布"按钮
+    publish_buttons = driver.find_elements(By.XPATH, '//div[contains(@class,"_edit-section-btns_")]//div[text()="发布"]')
+    if publish_buttons:
+        publish_button = publish_buttons[0]
+    else:
+        # 备用方案：查找所有包含"发布"文本的按钮
+        publish_button = driver.find_element(By.XPATH, '//div[contains(@class,"_button-primary_")]')
     auto_publish = st.session_state.get('video_publish_auto_publish')
     if auto_publish:
         print("auto publish")
