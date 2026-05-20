@@ -31,6 +31,7 @@ import streamlit as st
 
 from services.captioning.captioning_service import add_subtitles
 from services.hunjian.hunjian_service import get_session_video_scene_text, get_video_scene_text_list
+from services.video.originality_service import OriginalityService
 from services.video.texiao_service import gen_filter
 from services.video.video_service import DEFAULT_DURATION, get_image_info, get_video_duration, get_video_info, \
     get_video_length_list, add_background_music
@@ -181,6 +182,19 @@ class VideoMergeService:
         self.video_transition_effect_value = st.session_state["video_transition_effect_value"]
         self.default_duration = DEFAULT_DURATION
 
+        # 原创性提升配置
+        self.enable_originality = st.session_state.get("enable_video_originality", True)
+        self.random_start_max_offset = st.session_state.get("video_random_start_max_offset", 2.0)
+        self.random_start_max_duration = st.session_state.get("video_random_start_max_duration", 5.0)
+        self.filter_preset = st.session_state.get("video_filter_preset", "light")
+        self.watermark_path = st.session_state.get("video_watermark_path", "")
+        self.watermark_position = st.session_state.get("video_watermark_position", "bottom_right")
+        self.watermark_opacity = st.session_state.get("video_watermark_opacity", 0.7)
+        self.watermark_scale = st.session_state.get("video_watermark_scale", 0.15)
+
+        # 创建原创性服务
+        self.originality_service = OriginalityService(work_output_dir)
+
     def normalize_video(self):
         return_video_list = []
         for media_file in self.video_list:
@@ -249,7 +263,20 @@ class VideoMergeService:
                 # 执行FFmpeg命令
                 print(" ".join(command))
                 run_ffmpeg_command(command)
-                return_video_list.append(output_name)
+
+                # 应用原创性提升处理（随机起点 + 滤镜 + 水印）
+                processed_file = self.originality_service.process_video(
+                    output_name,
+                    enable_random_start=self.enable_originality,
+                    max_offset=self.random_start_max_offset,
+                    max_duration=self.random_start_max_duration,
+                    filter_preset=self.filter_preset,
+                    watermark_path=self.watermark_path if self.watermark_path else None,
+                    watermark_position=self.watermark_position,
+                    watermark_opacity=self.watermark_opacity,
+                    watermark_scale=self.watermark_scale
+                )
+                return_video_list.append(processed_file)
         self.video_list = return_video_list
         return return_video_list
 
