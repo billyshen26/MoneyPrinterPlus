@@ -184,14 +184,46 @@ class VideoMergeService:
 
         # 原创性提升配置
         self.enable_originality = st.session_state.get("enable_video_originality", True)
+        
+        # 随机起点截取
         self.random_start_max_offset = st.session_state.get("video_random_start_max_offset", 2.0)
         self.random_start_max_duration = st.session_state.get("video_random_start_max_duration", 5.0)
-        self.filter_preset = st.session_state.get("video_filter_preset", "light")
+        
+        # 变速处理
+        self.enable_speed_change = st.session_state.get("enable_speed_change", False)
+        self.speed_range_min = st.session_state.get("speed_range_min", 0.92)
+        self.speed_range_max = st.session_state.get("speed_range_max", 1.08)
+        
+        # 镜像翻转
+        self.enable_mirror = st.session_state.get("enable_mirror", False)
+        self.mirror_direction = st.session_state.get("mirror_direction", "horizontal")
+        
+        # 随机缩放
+        self.enable_random_crop = st.session_state.get("enable_random_crop", False)
+        self.crop_scale_min = st.session_state.get("crop_scale_min", 0.95)
+        self.crop_scale_max = st.session_state.get("crop_scale_max", 1.05)
+        
+        # 噪点
+        self.enable_noise = st.session_state.get("enable_noise", False)
+        self.noise_intensity = st.session_state.get("noise_intensity", 15)
+        
+        # 速度渐变
+        self.enable_speed_ramp = st.session_state.get("enable_speed_ramp", False)
+        self.speed_ramp_type = st.session_state.get("speed_ramp_type", "ease_in_out")
+        
+        # 滤镜
+        self.filter_preset = st.session_state.get("video_filter_preset", "none")
+        
+        # 水印
         self.watermark_path = st.session_state.get("video_watermark_path", "")
         self.watermark_position = st.session_state.get("video_watermark_position", "bottom_right")
         self.watermark_opacity = st.session_state.get("video_watermark_opacity", 0.7)
         self.watermark_scale = st.session_state.get("video_watermark_scale", 0.15)
-
+        
+        # 音频处理
+        self.remove_original_audio = st.session_state.get("remove_original_audio", False)
+        self.new_bgm_dir = st.session_state.get("new_bgm_dir", "")
+        
         # 创建原创性服务
         self.originality_service = OriginalityService(work_output_dir)
 
@@ -264,21 +296,64 @@ class VideoMergeService:
                 print(" ".join(command))
                 run_ffmpeg_command(command)
 
-                # 应用原创性提升处理（随机起点 + 滤镜 + 水印）
+                # 应用原创性提升处理
                 processed_file = self.originality_service.process_video(
                     output_name,
+                    # 随机起点
                     enable_random_start=self.enable_originality,
                     max_offset=self.random_start_max_offset,
                     max_duration=self.random_start_max_duration,
+                    # 变速
+                    enable_speed_change=self.enable_speed_change,
+                    speed_range=(self.speed_range_min, self.speed_range_max),
+                    # 镜像
+                    enable_mirror=self.enable_mirror,
+                    mirror_direction=self.mirror_direction,
+                    # 缩放
+                    enable_random_crop=self.enable_random_crop,
+                    crop_scale_range=(self.crop_scale_min, self.crop_scale_max),
+                    # 噪点
+                    enable_noise=self.enable_noise,
+                    noise_intensity=self.noise_intensity,
+                    # 速度渐变
+                    enable_speed_ramp=self.enable_speed_ramp,
+                    speed_ramp_type=self.speed_ramp_type,
+                    # 滤镜
                     filter_preset=self.filter_preset,
+                    # 水印
                     watermark_path=self.watermark_path if self.watermark_path else None,
                     watermark_position=self.watermark_position,
                     watermark_opacity=self.watermark_opacity,
-                    watermark_scale=self.watermark_scale
+                    watermark_scale=self.watermark_scale,
+                    # 音频
+                    remove_original_audio=self.remove_original_audio
                 )
                 return_video_list.append(processed_file)
+
+        # 标准化所有视频尺寸，确保完全一致
+        if len(return_video_list) > 1 and self.enable_video_transition_effect:
+            return_video_list = self._normalize_video_sizes(return_video_list)
+
         self.video_list = return_video_list
         return return_video_list
+
+    def _normalize_video_sizes(self, video_list):
+        """标准化视频尺寸，确保所有视频完全一致"""
+        normalized_list = []
+        for video_file in video_list:
+            output_file = generate_temp_filename(video_file, "_norm.mp4", work_output_dir)
+            command = [
+                'ffmpeg', '-i', video_file,
+                '-vf', f"scale={self.target_width}:{self.target_height}:force_original_aspect_ratio=increase,crop={self.target_width}:{self.target_height},setsar=1",
+                '-c:v', 'libx264', '-preset', 'fast', '-y', output_file
+            ]
+            print(f"标准化视频尺寸: {self.target_width}x{self.target_height}")
+            run_ffmpeg_command(command)
+            if os.path.exists(output_file):
+                normalized_list.append(output_file)
+            else:
+                normalized_list.append(video_file)
+        return normalized_list
 
     def generate_video_with_bg_music(self):
         # 生成视频和音频的代码
@@ -302,12 +377,29 @@ class VideoMergeService:
                              '-y',
                              merge_video]
 
+        # 检查是否有音频流
+        has_audio = False
+        for video_file in self.video_list:
+            try:
+                from services.video.video_service import get_video_duration
+                # 尝试检查音频流
+                result = subprocess.run(
+                    ['ffprobe', '-v', 'error', '-select_streams', 'a:0', '-show_entries', 'stream=codec_type', 
+                     '-of', 'csv=p=0', video_file],
+                    capture_output=True, text=True
+                )
+                if 'audio' in result.stdout.lower():
+                    has_audio = True
+                    break
+            except:
+                pass
+
         # 是否需要转场特效
-        if self.enable_video_transition_effect and len(self.video_list) > 1:
+        if self.enable_video_transition_effect and len(self.video_list) > 1 and has_audio:
             video_length_list = get_video_length_list(self.video_list)
             # 过滤掉无效的时长值
             video_length_list = [float(length) if length else 5.0 for length in video_length_list]
-            print("启动转场特效")
+            print("启动转场特效（带音频）")
             zhuanchang_txt = gen_filter(video_length_list, None, None,
                                         self.video_transition_effect_type,
                                         self.video_transition_effect_value,
@@ -322,6 +414,23 @@ class VideoMergeService:
                                  '-map', '[audio]',
                                  '-y',
                                  merge_video]
+        elif self.enable_video_transition_effect and len(self.video_list) > 1:
+            # 有转场但没有音频，使用简单的视频concat
+            print("启动转场特效（仅视频，无音频）")
+            video_length_list = get_video_length_list(self.video_list)
+            video_length_list = [float(length) if length else 5.0 for length in video_length_list]
+            zhuanchang_txt = gen_filter(video_length_list, None, None,
+                                        self.video_transition_effect_type,
+                                        self.video_transition_effect_value,
+                                        self.video_transition_effect_duration,
+                                        False)
+
+            files_input = [['-i', f] for f in self.video_list]
+            ffmpeg_concat_cmd = ['ffmpeg', *itertools.chain(*files_input),
+                                 '-filter_complex', zhuanchang_txt,
+                                 '-map', '[video]',
+                                 '-y',
+                                 merge_video]
 
         subprocess.run(ffmpeg_concat_cmd)
         # 删除临时文件
@@ -329,5 +438,16 @@ class VideoMergeService:
 
         # 添加背景音乐
         if self.enable_background_music:
+            # 如果设置了新BGM目录，随机选择一首音乐
+            if self.new_bgm_dir and os.path.isdir(self.new_bgm_dir):
+                import glob
+                bgm_files = glob.glob(os.path.join(self.new_bgm_dir, "*.mp3")) + \
+                           glob.glob(os.path.join(self.new_bgm_dir, "*.wav"))
+                if bgm_files:
+                    import random
+                    selected_bgm = random.choice(bgm_files)
+                    print(f"随机选择BGM: {selected_bgm}")
+                    self.background_music = selected_bgm
+            
             add_background_music(merge_video, self.background_music, self.background_music_volume)
         return merge_video

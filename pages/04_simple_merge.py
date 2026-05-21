@@ -200,60 +200,116 @@ with subtitle_container:
 originality_container = st.container(border=True)
 with originality_container:
     st.subheader("原创性提升")
-    llm_columns = st.columns(2)
+    
+    # 第一行：开关和滤镜
+    llm_columns = st.columns(3)
     with llm_columns[0]:
         st.checkbox(label="启用原创性提升", key="enable_video_originality", value=True,
-                   help="开启后将对视频进行随机起点截取、滤镜处理和水印添加")
+                   help="开启后将对视频进行处理")
     with llm_columns[1]:
         filter_options = {"none": "无", "light": "轻微", "medium": "中等", "strong": "明显"}
         st.selectbox(
             label="滤镜强度",
             key="video_filter_preset",
             options=filter_options,
-            format_func=lambda x: filter_options[x],
-            help="滤镜会微调视频的色彩饱和度、对比度等"
+            format_func=lambda x: filter_options[x]
         )
+    with llm_columns[2]:
+        st.checkbox(label="移除原音", key="remove_original_audio", value=False,
+                   help="移除视频中原有的音频")
 
-    llm_columns = st.columns(3)
+    # 第二行：随机起点
+    llm_columns = st.columns(4)
     with llm_columns[0]:
         st.slider(label="随机起点最大偏移（秒）", min_value=0.0, max_value=3.0,
-                  value=2.0, step=0.5, key="video_random_start_max_offset",
-                  help="随机从视频的0-X秒位置开始截取")
+                  value=2.0, step=0.5, key="video_random_start_max_offset")
     with llm_columns[1]:
         st.slider(label="最大截取时长（秒）", min_value=3.0, max_value=10.0,
-                  value=5.0, step=0.5, key="video_random_start_max_duration",
-                  help="每个视频片段最多截取多少秒")
+                  value=5.0, step=0.5, key="video_random_start_max_duration")
 
+    # 变速处理
     with llm_columns[2]:
+        st.checkbox(label="变速处理", key="enable_speed_change", value=False,
+                   help="随机加速或减速视频 5-10%")
+    with llm_columns[3]:
+        llm_columns2 = st.columns(2)
+        with llm_columns2[0]:
+            st.number_input(label="变速下限", min_value=0.80, max_value=1.0, 
+                           value=0.92, step=0.01, key="speed_range_min")
+        with llm_columns2[1]:
+            st.number_input(label="变速上限", min_value=1.0, max_value=1.20,
+                           value=1.08, step=0.01, key="speed_range_max")
+
+    # 第三行：镜像、噪点、缩放
+    llm_columns = st.columns(4)
+    with llm_columns[0]:
+        st.checkbox(label="镜像翻转", key="enable_mirror", value=False,
+                   help="水平或垂直翻转视频")
+    with llm_columns[1]:
+        mirror_options = {"horizontal": "水平镜像", "vertical": "垂直镜像", "both": "两者都有"}
+        st.selectbox(label="镜像方向", key="mirror_direction",
+                    options=mirror_options, format_func=lambda x: mirror_options[x])
+    with llm_columns[2]:
+        st.checkbox(label="随机缩放", key="enable_random_crop", value=False,
+                   help="随机缩放画面 95%-105%")
+    with llm_columns[3]:
+        st.checkbox(label="添加噪点", key="enable_noise", value=False,
+                   help="添加轻微画面噪点")
+
+    # 第四行：速度渐变
+    llm_columns = st.columns(4)
+    with llm_columns[0]:
+        st.checkbox(label="速度渐变", key="enable_speed_ramp", value=False,
+                   help="视频开始慢后变快，或开始快后变慢")
+    with llm_columns[1]:
+        ramp_options = {"ease_in": "开始慢后快", "ease_out": "开始快后慢", "ease_in_out": "慢-快-慢"}
+        st.selectbox(label="渐变方式", key="speed_ramp_type",
+                    options=ramp_options, format_func=lambda x: ramp_options[x])
+    with llm_columns[2]:
+        st.slider(label="噪点强度", min_value=5, max_value=30, value=15,
+                  key="noise_intensity", help="噪点强度，值越大噪点越明显")
+    with llm_columns[3]:
+        pass
+
+    # 第五行：水印
+    llm_columns = st.columns(4)
+    with llm_columns[0]:
         st.text_input(
             label="水印图片路径",
             key="video_watermark_path",
             placeholder="输入水印图片路径",
-            help="水印图片的完整路径，支持 PNG/JPG"
+            help="支持 PNG/JPG"
         )
-    with llm_columns[2]:
+    with llm_columns[1]:
         watermark_pos_options = {
-            "top_left": "左上角",
-            "top_right": "右上角",
-            "bottom_left": "左下角",
-            "bottom_right": "右下角",
-            "center": "居中"
+            "top_left": "左上角", "top_right": "右上角",
+            "bottom_left": "左下角", "bottom_right": "右下角", "center": "居中"
         }
-        st.selectbox(
-            label="水印位置",
-            key="video_watermark_position",
-            options=watermark_pos_options,
-            format_func=lambda x: watermark_pos_options[x]
-        )
-
-    llm_columns = st.columns(3)
-    with llm_columns[0]:
+        st.selectbox(label="水印位置", key="video_watermark_position",
+                    options=watermark_pos_options, format_func=lambda x: watermark_pos_options[x])
+    with llm_columns[2]:
         st.slider(label="水印透明度", min_value=0.1, max_value=1.0,
                   value=0.7, step=0.1, key="video_watermark_opacity")
-    with llm_columns[1]:
+    with llm_columns[3]:
         st.slider(label="水印大小比例", min_value=0.05, max_value=0.30,
-                  value=0.15, step=0.05, key="video_watermark_scale",
-                  help="水印相对于视频宽度的比例")
+                  value=0.15, step=0.05, key="video_watermark_scale")
+
+    # 第六行：新BGM目录
+    llm_columns = st.columns(2)
+    with llm_columns[0]:
+        st.text_input(
+            label="新BGM目录（抖音热门音乐）",
+            key="new_bgm_dir",
+            placeholder="输入BGM文件夹路径，留空使用背景音乐目录",
+            help="如果设置，将随机从该目录选择音乐替换原视频音乐"
+        )
+    with llm_columns[1]:
+        st.markdown("""
+        **抖音热门BGM下载提示：**  
+        请自行下载抖音热门背景音乐放入上述目录，推荐从以下渠道获取：
+        - 抖音创作者服务平台
+        - 音乐版权平台（如音加加）
+        """)
 
 # 生成视频
 video_generator = st.container(border=True)

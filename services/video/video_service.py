@@ -200,16 +200,35 @@ def add_music(video_file, audio_file):
 
 def add_background_music(video_file, audio_file, bgm_volume=0.5):
     output_file = generate_temp_filename(video_file)
+    
+    # 先检查视频是否有音频流
+    result = subprocess.run(
+        ['ffprobe', '-v', 'error', '-select_streams', 'a:0', '-show_entries', 'stream=codec_type',
+         '-of', 'csv=p=0', video_file],
+        capture_output=True, text=True
+    )
+    has_audio = 'audio' in result.stdout.lower()
+    
+    if has_audio:
+        # 视频有音频，混合原音频和BGM
+        filter_complex = (
+            f"[1:a]aloop=loop=0:size=100M[bgm];[bgm]volume={bgm_volume}[bgm_vol];"
+            f"[0:a][bgm_vol]amix=duration=first:dropout_transition=3:inputs=2[a]"
+        )
+        audio_map = '[a]'
+    else:
+        # 视频没有音频，直接使用BGM
+        filter_complex = f"[1:a]aloop=loop=0:size=100M,volume={bgm_volume}[a]"
+        audio_map = '[a]'
+    
     # 构建FFmpeg命令
     command = [
         'ffmpeg',
         '-i', video_file,  # 输入视频文件
         '-i', audio_file,  # 输入音频文件（背景音乐）
-        '-filter_complex',
-        f"[1:a]aloop=loop=0:size=100M[bgm];[bgm]volume={bgm_volume}[bgm_vol];[0:a][bgm_vol]amix=duration=first:dropout_transition=3:inputs=2[a]",
-        # 在[1:a]之后添加了aloop过滤器来循环背景音乐。loop=0表示无限循环，size=200M和duration=300是可选参数，用于设置循环音频的大小或时长（这里设置得很大以确保足够长，可以根据实际需要调整），start=0表示从音频的开始处循环。
+        '-filter_complex', filter_complex,
         '-map', '0:v',  # 选择视频流
-        '-map', '[a]',  # 选择混合后的音频流
+        '-map', audio_map,  # 选择混合后的音频流
         '-c:v', 'copy',  # 复制视频流
         '-shortest',  # 输出时长与最短的输入流相同
         output_file  # 输出文件
