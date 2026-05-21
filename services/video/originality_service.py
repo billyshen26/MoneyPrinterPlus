@@ -89,6 +89,9 @@ class OriginalityService:
                 ]
                 print(f"截取固定时长: {max_duration}秒")
                 run_ffmpeg_command(command)
+                if not os.path.exists(output_file):
+                    print("固定时长截取失败，返回原视频")
+                    return video_file
                 return output_file
             return video_file
 
@@ -108,7 +111,10 @@ class OriginalityService:
         ]
 
         print(f"随机起点截取: 起始={start_point:.2f}秒, 时长={max_duration}秒")
-        run_ffmpeg_command(command)
+        success = run_ffmpeg_command(command)
+        if not success or not os.path.exists(output_file):
+            print("随机起点截取失败，返回原视频")
+            return video_file
         return output_file
 
     def apply_filter(self, video_file, filter_preset="light"):
@@ -141,7 +147,10 @@ class OriginalityService:
         ]
 
         print(f"应用滤镜: {filter_preset} - {filter_str}")
-        run_ffmpeg_command(command)
+        success = run_ffmpeg_command(command)
+        if not success or not os.path.exists(output_file):
+            print("滤镜处理失败，返回原视频")
+            return video_file
         return output_file
 
     def add_watermark(self, video_file, watermark_path, position="bottom_right",
@@ -182,7 +191,10 @@ class OriginalityService:
         ]
 
         print(f"添加水印: 位置={position}, 透明度={opacity}, 比例={scale}")
-        run_ffmpeg_command(command)
+        success = run_ffmpeg_command(command)
+        if not success or not os.path.exists(output_file):
+            print("水印处理失败，返回原视频")
+            return video_file
         return output_file
 
     def process_video(self, video_file, enable_random_start=True, max_offset=2.0,

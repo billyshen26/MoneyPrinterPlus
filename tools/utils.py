@@ -140,13 +140,12 @@ def must_have_value(option: str, msg: str) -> Optional[str]:
 
 def run_ffmpeg_command(command):
     try:
-        result = subprocess.run(command, capture_output=True, check=True, text=True)
-        if result.returncode != 0:
-            print(f"FFmpeg returned an error: {result.stderr}")
-        else:
-            print("Command executed successfully.")
+        result = subprocess.run(command, capture_output=True, check=True)
+        print("Command executed successfully.")
+        return True
     except Exception as e:
         print(f"An error occurred while execute ffmpeg command {e}")
+        return False
 
 
 def extent_audio(audio_file, pad_dur=2):

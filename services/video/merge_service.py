@@ -305,6 +305,8 @@ class VideoMergeService:
         # 是否需要转场特效
         if self.enable_video_transition_effect and len(self.video_list) > 1:
             video_length_list = get_video_length_list(self.video_list)
+            # 过滤掉无效的时长值
+            video_length_list = [float(length) if length else 5.0 for length in video_length_list]
             print("启动转场特效")
             zhuanchang_txt = gen_filter(video_length_list, None, None,
                                         self.video_transition_effect_type,

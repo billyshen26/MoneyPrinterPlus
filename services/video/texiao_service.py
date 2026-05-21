@@ -33,6 +33,9 @@ def gen_filter(segments, target_width, target_height,transition_type, transition
     video_length = 0
     file_lengths = [0] * len(segments)
 
+    # 确保所有 segments 都是可计算的数值类型
+    segments = [float(s) for s in segments]
+
     if target_width:
         for i in range(len(segments)):
             # 视频归一化
