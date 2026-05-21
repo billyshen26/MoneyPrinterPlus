@@ -338,16 +338,17 @@ class VideoMergeService:
         return return_video_list
 
     def _normalize_video_sizes(self, video_list):
-        """标准化视频尺寸，确保所有视频完全一致"""
+        """标准化视频尺寸和帧率，确保所有视频完全一致"""
         normalized_list = []
         for video_file in video_list:
             output_file = generate_temp_filename(video_file, "_norm.mp4", work_output_dir)
             command = [
                 'ffmpeg', '-i', video_file,
-                '-vf', f"scale={self.target_width}:{self.target_height}:force_original_aspect_ratio=increase,crop={self.target_width}:{self.target_height},setsar=1",
+                '-vf', f"scale={self.target_width}:{self.target_height}:force_original_aspect_ratio=increase,crop={self.target_width}:{self.target_height},setsar=1,fps={self.fps}",
+                '-r', str(self.fps),
                 '-c:v', 'libx264', '-preset', 'fast', '-y', output_file
             ]
-            print(f"标准化视频尺寸: {self.target_width}x{self.target_height}")
+            print(f"标准化视频: {self.target_width}x{self.target_height}@{self.fps}fps")
             run_ffmpeg_command(command)
             if os.path.exists(output_file):
                 normalized_list.append(output_file)
