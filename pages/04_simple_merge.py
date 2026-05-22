@@ -305,11 +305,39 @@ with originality_container:
         )
     with llm_columns[1]:
         st.markdown("""
-        **抖音热门BGM下载提示：**  
+        **抖音热门BGM下载提示：**
         请自行下载抖音热门背景音乐放入上述目录，推荐从以下渠道获取：
         - 抖音创作者服务平台
         - 音乐版权平台（如音加加）
         """)
+
+# 自动封面配置
+cover_container = st.container(border=True)
+with cover_container:
+    st.subheader("自动封面（4宫格）")
+    llm_columns = st.columns(3)
+    with llm_columns[0]:
+        st.checkbox(
+            label="启用自动4宫格封面",
+            key="enable_auto_cover",
+            value=False,
+            help="从4个视频中各截取一帧，拼接成4宫格作为视频封面（需要>=4个视频）"
+        )
+    with llm_columns[1]:
+        st.number_input(
+            label="截图时间点（秒）",
+            key="cover_timestamp",
+            min_value=1.0,
+            max_value=10.0,
+            value=2.0,
+            step=0.5,
+            help="从每个视频的第几秒截取封面帧"
+        )
+    with llm_columns[2]:
+        # 显示生成的封面图片
+        generated_cover = st.session_state.get("generated_cover_image")
+        if generated_cover and os.path.exists(generated_cover):
+            st.image(generated_cover, caption="生成的封面", width=150)
 
 # 生成视频
 video_generator = st.container(border=True)

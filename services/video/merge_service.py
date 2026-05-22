@@ -224,11 +224,43 @@ class VideoMergeService:
         self.remove_original_audio = st.session_state.get("remove_original_audio", False)
         self.new_bgm_dir = st.session_state.get("new_bgm_dir", "")
         
+        # 自动封面配置
+        self.enable_auto_cover = st.session_state.get("enable_auto_cover", False)
+        self.cover_timestamp = st.session_state.get("cover_timestamp", 2.0)
+        
         # 创建原创性服务
         self.originality_service = OriginalityService(work_output_dir)
 
     def normalize_video(self):
         return_video_list = []
+        
+        # 保存原始视频列表用于生成封面
+        original_video_list = [f for f in self.video_list 
+                              if not f.lower().endswith(('.jpg', '.jpeg', '.png'))]
+        
+        # 生成4宫格封面
+        cover_video = None
+        if self.enable_auto_cover:
+            print(f"自动封面已启用，视频数量: {len(original_video_list)}")
+        if self.enable_auto_cover and len(original_video_list) >= 4:
+            from services.video.video_service import generate_video_cover
+            print(f"开始生成4宫格封面...")
+            cover_image, cover_video = generate_video_cover(
+                original_video_list, 
+                video_output_dir,
+                self.target_width, 
+                self.target_height,
+                self.fps,
+                self.cover_timestamp
+            )
+            if cover_image:
+                st.session_state["generated_cover_image"] = cover_image
+                print(f"封面图片已生成: {cover_image}")
+            else:
+                print("封面图片生成失败")
+        elif self.enable_auto_cover and len(original_video_list) < 4:
+            print(f"视频数量不足4个，当前只有 {len(original_video_list)} 个视频，跳过封面生成")
+        
         for media_file in self.video_list:
             # 如果当前文件是图片，添加转换为视频的命令
             if media_file.lower().endswith(('.jpg', '.jpeg', '.png')):
@@ -333,6 +365,11 @@ class VideoMergeService:
         # 标准化所有视频尺寸，确保完全一致
         if len(return_video_list) > 1 and self.enable_video_transition_effect:
             return_video_list = self._normalize_video_sizes(return_video_list)
+        
+        # 将封面视频插入到最前面
+        if cover_video and os.path.exists(cover_video):
+            return_video_list.insert(0, cover_video)
+            print(f"封面视频已插入到视频列表最前面: {cover_video}")
 
         self.video_list = return_video_list
         return return_video_list
@@ -378,12 +415,14 @@ class VideoMergeService:
                              '-y',
                              merge_video]
 
-        # 检查是否有音频流
+        # 检查是否有音频流（排除封面视频）
         has_audio = False
+        videos_with_audio = []
         for video_file in self.video_list:
+            # 跳过封面视频
+            if 'cover_video' in video_file:
+                continue
             try:
-                from services.video.video_service import get_video_duration
-                # 尝试检查音频流
                 result = subprocess.run(
                     ['ffprobe', '-v', 'error', '-select_streams', 'a:0', '-show_entries', 'stream=codec_type', 
                      '-of', 'csv=p=0', video_file],
@@ -391,49 +430,75 @@ class VideoMergeService:
                 )
                 if 'audio' in result.stdout.lower():
                     has_audio = True
-                    break
+                    videos_with_audio.append(video_file)
             except:
                 pass
 
+        # 如果有封面视频，需要单独处理
+        has_cover = any('cover_video' in v for v in self.video_list)
+
         # 是否需要转场特效
-        if self.enable_video_transition_effect and len(self.video_list) > 1 and has_audio:
-            video_length_list = get_video_length_list(self.video_list)
-            # 过滤掉无效的时长值
-            video_length_list = [float(length) if length else 5.0 for length in video_length_list]
-            print("启动转场特效（带音频）")
-            zhuanchang_txt = gen_filter(video_length_list, None, None,
-                                        self.video_transition_effect_type,
-                                        self.video_transition_effect_value,
-                                        self.video_transition_effect_duration,
-                                        True)
+        if self.enable_video_transition_effect and len(self.video_list) > 1:
+            # 获取实际有音频的视频时长
+            real_videos = [v for v in self.video_list if 'cover_video' not in v]
+            if len(real_videos) > 1:
+                video_length_list = get_video_length_list(real_videos)
+                video_length_list = [float(length) if length else 5.0 for length in video_length_list]
+                
+                # 只对有音频的视频使用音频转场
+                use_audio_transition = has_audio and len(videos_with_audio) > 1
+                
+                if use_audio_transition:
+                    print("启动转场特效（带音频）")
+                    zhuanchang_txt = gen_filter(video_length_list, None, None,
+                                                self.video_transition_effect_type,
+                                                self.video_transition_effect_value,
+                                                self.video_transition_effect_duration,
+                                                True)
 
-            # File inputs from the list
-            files_input = [['-i', f] for f in self.video_list]
-            ffmpeg_concat_cmd = ['ffmpeg', *itertools.chain(*files_input),
-                                 '-filter_complex', zhuanchang_txt,
-                                 '-map', '[video]',
-                                 '-map', '[audio]',
-                                 '-y',
-                                 merge_video]
-        elif self.enable_video_transition_effect and len(self.video_list) > 1:
-            # 有转场但没有音频，使用简单的视频concat
-            print("启动转场特效（仅视频，无音频）")
-            video_length_list = get_video_length_list(self.video_list)
-            video_length_list = [float(length) if length else 5.0 for length in video_length_list]
-            zhuanchang_txt = gen_filter(video_length_list, None, None,
-                                        self.video_transition_effect_type,
-                                        self.video_transition_effect_value,
-                                        self.video_transition_effect_duration,
-                                        False)
+                    # File inputs from the list
+                    files_input = [['-i', f] for f in real_videos]
+                    ffmpeg_concat_cmd = ['ffmpeg', *itertools.chain(*files_input),
+                                         '-filter_complex', zhuanchang_txt,
+                                         '-map', '[video]',
+                                         '-map', '[audio]',
+                                         '-y',
+                                         merge_video]
+                    subprocess.run(ffmpeg_concat_cmd)
+                else:
+                    print("启动转场特效（仅视频）")
+                    zhuanchang_txt = gen_filter(video_length_list, None, None,
+                                                self.video_transition_effect_type,
+                                                self.video_transition_effect_value,
+                                                self.video_transition_effect_duration,
+                                                False)
 
-            files_input = [['-i', f] for f in self.video_list]
-            ffmpeg_concat_cmd = ['ffmpeg', *itertools.chain(*files_input),
-                                 '-filter_complex', zhuanchang_txt,
-                                 '-map', '[video]',
-                                 '-y',
-                                 merge_video]
-
-        subprocess.run(ffmpeg_concat_cmd)
+                    files_input = [['-i', f] for f in real_videos]
+                    ffmpeg_concat_cmd = ['ffmpeg', *itertools.chain(*files_input),
+                                         '-filter_complex', zhuanchang_txt,
+                                         '-map', '[video]',
+                                         '-y',
+                                         merge_video]
+                    subprocess.run(ffmpeg_concat_cmd)
+                
+                # 如果有封面视频，拼接封面到最前面
+                if has_cover:
+                    cover_video = next(v for v in self.video_list if 'cover_video' in v)
+                    # 先保存合并的视频
+                    temp_merge = merge_video.replace('.mp4', '_no_cover.mp4')
+                    if os.path.exists(merge_video):
+                        os.rename(merge_video, temp_merge)
+                    # 拼接封面
+                    concat_file = temp_merge.replace('.mp4', '_concat.txt')
+                    with open(concat_file, 'w') as f:
+                        f.write(f"file '{cover_video}'\n")
+                        f.write(f"file '{temp_merge}'\n")
+                    concat_cmd = ['ffmpeg', '-f', 'concat', '-safe', '0', '-i', concat_file,
+                                  '-c', 'copy', '-y', merge_video]
+                    subprocess.run(concat_cmd)
+                    # 清理临时文件
+                    os.remove(temp_merge)
+                    os.remove(concat_file)
         # 删除临时文件
         os.remove(temp_video_filelist_path)
 

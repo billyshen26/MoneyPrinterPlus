@@ -245,6 +245,170 @@ def add_background_music(video_file, audio_file, bgm_volume=0.5):
         os.renames(output_file, video_file)
 
 
+def extract_video_frame(video_file, timestamp, output_image):
+    """从视频中截取指定时间点的帧作为图片"""
+    command = [
+        'ffmpeg', '-ss', str(timestamp),
+        '-i', video_file,
+        '-vframes', '1',
+        '-y', output_image
+    ]
+    print(f"截取封面帧: {video_file} @ {timestamp}s")
+    result = subprocess.run(command, capture_output=True)
+    return os.path.exists(output_image)
+
+
+def create_4grid_cover(frame_files, output_image, thumb_width, thumb_height):
+    """创建4宫格封面图"""
+    if len(frame_files) < 4:
+        print(f"帧文件数量不足: {len(frame_files)}")
+        return False
+    
+    w, h = thumb_width, thumb_height
+    
+    # 先缩放每个帧到统一尺寸并保存
+    scaled_files = []
+    for i, frame in enumerate(frame_files[:4]):
+        scaled = os.path.join(os.path.dirname(output_image), f'scaled_{i}.jpg')
+        scale_cmd = [
+            'ffmpeg', '-i', frame,
+            '-vf', f'scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h}',
+            '-y', scaled
+        ]
+        subprocess.run(scale_cmd, capture_output=True)
+        if os.path.exists(scaled):
+            scaled_files.append(scaled)
+    
+    if len(scaled_files) < 4:
+        print(f"缩放失败，只成功 {len(scaled_files)} 个")
+        return False
+    
+    # 使用ffmpeg的vstack和hstack拼接
+    # 先横向拼接每行
+    top_row = os.path.join(os.path.dirname(output_image), 'top_row.jpg')
+    bottom_row = os.path.join(os.path.dirname(output_image), 'bottom_row.jpg')
+    
+    hstack1 = subprocess.run([
+        'ffmpeg', '-i', scaled_files[0], '-i', scaled_files[1],
+        '-filter_complex', 'hstack=inputs=2', '-y', top_row
+    ], capture_output=True)
+    
+    hstack2 = subprocess.run([
+        'ffmpeg', '-i', scaled_files[2], '-i', scaled_files[3],
+        '-filter_complex', 'hstack=inputs=2', '-y', bottom_row
+    ], capture_output=True)
+    
+    # 再纵向拼接
+    vstack = subprocess.run([
+        'ffmpeg', '-i', top_row, '-i', bottom_row,
+        '-filter_complex', 'vstack=inputs=2', '-y', output_image
+    ], capture_output=True)
+    
+    # 清理临时文件
+    for f in scaled_files + [top_row, bottom_row]:
+        if os.path.exists(f):
+            os.remove(f)
+    
+    success = os.path.exists(output_image)
+    print(f"4宫格封面创建{'成功' if success else '失败'}")
+    return success
+
+
+def create_cover_video(image_file, duration, fps, width, height, output_video):
+    """将图片转换为视频"""
+    command = [
+        'ffmpeg', '-loop', '1',
+        '-i', image_file,
+        '-t', str(duration),
+        '-r', str(fps),
+        '-vf', f'scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height}',
+        '-c:v', 'libx264', '-preset', 'fast',
+        '-pix_fmt', 'yuv420p',
+        '-y', output_video
+    ]
+    print(f"封面图转视频: {image_file} -> {output_video}")
+    subprocess.run(command, capture_output=True)
+    return os.path.exists(output_video)
+
+
+def generate_video_cover(video_list, output_dir, video_width, video_height, fps, timestamp=2):
+    """
+    生成4宫格封面视频
+    
+    Args:
+        video_list: 视频文件列表（需要>=4个）
+        output_dir: 输出目录
+        video_width: 视频宽度
+        video_height: 视频高度
+        fps: 帧率
+        timestamp: 截取帧的时间点（秒）
+    
+    Returns:
+        (cover_image_path, cover_video_path) or (None, None) if failed
+    """
+    import uuid
+    
+    print(f"[DEBUG] generate_video_cover 被调用，视频列表: {video_list[:2]}...")  # 只打印前两个
+    
+    if len(video_list) < 4:
+        print(f"视频数量不足4个，无法生成4宫格封面。当前有 {len(video_list)} 个视频")
+        return None, None
+    
+    # 缩略图尺寸（视频尺寸的一半）
+    thumb_width = video_width // 2
+    thumb_height = video_height // 2
+    
+    # 临时目录存放帧图片
+    temp_dir = os.path.join(output_dir, 'cover_temp')
+    os.makedirs(temp_dir, exist_ok=True)
+    
+    # 截取每个视频的帧
+    frame_files = []
+    for i, video_file in enumerate(video_list[:4]):
+        frame_path = os.path.join(temp_dir, f'frame_{i}_{uuid.uuid4().hex[:8]}.jpg')
+        print(f"[DEBUG] 截取第 {i+1} 个视频的帧...")
+        if extract_video_frame(video_file, timestamp, frame_path):
+            frame_files.append(frame_path)
+            print(f"[DEBUG] 帧截取成功: {frame_path}")
+    
+    print(f"[DEBUG] 共截取 {len(frame_files)} 个帧")
+    
+    if len(frame_files) < 4:
+        print("截取帧失败")
+        return None, None
+    
+    # 创建4宫格封面图
+    cover_image = os.path.join(output_dir, 'cover.jpg')
+    if create_4grid_cover(frame_files, cover_image, thumb_width, thumb_height):
+        print(f"4宫格封面已保存: {cover_image}")
+    else:
+        print("创建4宫格封面失败")
+        return None, None
+    
+    # 清理帧图片
+    for f in frame_files:
+        if os.path.exists(f):
+            os.remove(f)
+    
+    # 创建封面视频（1秒）
+    cover_video = os.path.join(output_dir, 'cover_video.mp4')
+    if create_cover_video(cover_image, 1, fps, video_width, video_height, cover_video):
+        print(f"封面视频已创建: {cover_video}")
+    else:
+        print("创建封面视频失败")
+        return None, None
+    
+    # 清理临时目录（保留封面图和封面视频，它们已保存到output_dir）
+    try:
+        import shutil
+        if os.path.exists(temp_dir):
+            shutil.rmtree(temp_dir)
+    except:
+        pass
+    
+    return cover_image, cover_video
+
+
 class VideoMixService:
     def __init__(self):
         self.fps = st.session_state["video_fps"]
