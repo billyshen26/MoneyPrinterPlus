@@ -50,6 +50,7 @@ def common_ui():
     st.sidebar.page_link("pages/02_mix_video.py", label=tr("Mix Video"))
     st.sidebar.page_link("pages/02_merge_video.py", label=tr("Merge Video"))
     st.sidebar.page_link("pages/04_simple_merge.py", label=tr("Simple Merge Video"))
+    st.sidebar.page_link("pages/05_video_grid.py", label=tr("Video Grid"))
     st.sidebar.page_link("pages/03_auto_publish.py", label=tr("Video Auto Publish"))
     # st.sidebar.markdown(
     #     '<a style="text-align: center;padding-top: 0rem;" href="http://www.flydean.com">Developed by 程序那些事</a>',
