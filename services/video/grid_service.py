@@ -22,10 +22,11 @@
 #
 
 import os
-import random
+import re
 import subprocess
 
 import streamlit as st
+from PIL import Image, ImageDraw, ImageFont
 
 from tools.file_utils import generate_temp_filename
 from tools.utils import random_with_system_time
@@ -75,7 +76,6 @@ def extract_audio_from_video(video_file, output_audio=None):
 
 def get_video_duration(video_file):
     """获取视频时长（秒）"""
-    import re
     command = ['ffprobe', '-i', video_file, '-show_entries', 'format=duration', '-v', 'quiet', '-of', 'csv=p=0']
     result = subprocess.run(command, capture_output=True, text=True, encoding='utf-8', errors='replace')
     try:
@@ -101,6 +101,15 @@ def get_video_resolution(video_file):
         if len(parts) == 2:
             return int(parts[0]), int(parts[1])
     return None, None
+
+
+def extract_username_from_filename(filename):
+    """从文件名中提取用户名，格式: fav_用户名_ID.mp4"""
+    basename = os.path.basename(filename)
+    m = re.match(r'fav_(.+?)_\d+\.mp4$', basename)
+    if m:
+        return m.group(1)
+    return None
 
 
 class VideoGridService:
@@ -155,9 +164,23 @@ class VideoGridService:
 
         scaled_videos = []
         for i, video in enumerate(selected_videos):
+            username = extract_username_from_filename(video)
             scaled_video = generate_temp_filename(video, f"_scaled_{i}.mp4", work_output_dir)
-            self._scale_video(video, scaled_video, cell_width, cell_height)
-            scaled_videos.append(scaled_video)
+            ok = self._scale_video(video, scaled_video, cell_width, cell_height, username)
+            if not ok or not os.path.exists(scaled_video) or os.path.getsize(scaled_video) == 0:
+                print(f"缩放失败，跳过: {video}")
+            else:
+                scaled_videos.append(scaled_video)
+
+        if len(scaled_videos) < self.required_count:
+            print(f"警告: 只有 {len(scaled_videos)} 个视频缩放成功，需要 {self.required_count} 个")
+            for scaled in scaled_videos:
+                if os.path.exists(scaled):
+                    try:
+                        os.remove(scaled)
+                    except:
+                        pass
+            return None
 
         if self.layout == '4grid':
             final_video = self._create_4grid(scaled_videos, output_width, output_height, min_duration, output_video)
@@ -180,21 +203,90 @@ class VideoGridService:
 
         return final_video
 
-    def _scale_video(self, input_video, output_video, width, height):
-        """缩放视频到指定尺寸"""
+    def _render_username_image(self, username, output_path, width=288, font_size=24):
+        """用 Pillow 把用户名渲染成黑底白字图片"""
+        try:
+            img = Image.new('RGB', (width, font_size + 10), color=(0, 0, 0))
+            draw = ImageDraw.Draw(img)
+            font = None
+            for fp in ['C:/Windows/Fonts/msyh.ttc', 'C:/Windows/Fonts/simhei.ttf', 'C:/Windows/Fonts/simsun.ttc']:
+                if os.path.exists(fp):
+                    font = ImageFont.truetype(fp, font_size)
+                    break
+            if font is None:
+                font = ImageFont.load_default()
+            bbox = draw.textbbox((0, 0), username, font=font)
+            text_w = bbox[2] - bbox[0]
+            text_h = bbox[3] - bbox[1]
+            x = (width - text_w) // 2
+            y = 0
+            draw.text((x, y), username, fill=(255, 255, 255), font=font)
+            img.save(output_path)
+            return True
+        except Exception as e:
+            print(f"渲染用户名图片失败: {e}")
+            return False
+
+    def _scale_video(self, input_video, output_video, width, height, username=None):
+        """缩放视频到指定尺寸并添加用户名字幕"""
+        scaled_path = generate_temp_filename(input_video, "_scaled_raw.mp4", work_output_dir)
+
+        vf = f'scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height}'
         command = [
-            'ffmpeg',
-            '-i', input_video,
-            '-vf', f'scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height}',
+            'ffmpeg', '-i', input_video,
+            '-vf', vf,
             '-r', str(self.fps),
             '-c:v', 'libx264', '-preset', 'fast',
-            '-y',
-            output_video
+            '-y', scaled_path
         ]
-        print("缩放视频:", " ".join(command))
+        print("缩放视频:", ' '.join(command))
         result = subprocess.run(command, capture_output=True, text=True, encoding='utf-8', errors='replace')
         if result.returncode != 0:
             print(f"缩放视频失败: {result.stderr}")
+            if os.path.exists(scaled_path):
+                try:
+                    os.remove(scaled_path)
+                except:
+                    pass
+            return
+
+        if username:
+            img_path = generate_temp_filename(input_video, "_username.png", work_output_dir)
+            ok = self._render_username_image(username, img_path, width=width)
+            if ok:
+                overlay_cmd = [
+                    'ffmpeg', '-i', scaled_path,
+                    '-i', img_path,
+                    '-filter_complex', '[0:v][1:v]overlay=(W-w)/2:(H-h)',
+                    '-c:v', 'libx264', '-preset', 'fast',
+                    '-y', output_video
+                ]
+                print("叠加字幕:", ' '.join(overlay_cmd))
+                result2 = subprocess.run(overlay_cmd, capture_output=True, text=True, encoding='utf-8', errors='replace')
+                for f in [img_path, scaled_path]:
+                    try:
+                        if os.path.exists(f):
+                            os.remove(f)
+                    except:
+                        pass
+                if result2.returncode != 0:
+                    print(f"叠加字幕失败: {result2.stderr}")
+                    return False
+                return True
+            else:
+                try:
+                    if os.path.exists(scaled_path):
+                        os.rename(scaled_path, output_video)
+                except:
+                    pass
+                return False
+        else:
+            try:
+                if os.path.exists(scaled_path):
+                    os.rename(scaled_path, output_video)
+            except:
+                pass
+            return True
 
     def _create_4grid(self, scaled_videos, output_width, output_height, duration, output_video):
         """创建4宫格视频"""
