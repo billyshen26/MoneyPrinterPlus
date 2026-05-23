@@ -22,6 +22,7 @@
 #
 
 import os
+import random
 import re
 import subprocess
 
@@ -37,6 +38,32 @@ video_output_dir = os.path.join(script_dir, "../../final")
 video_output_dir = os.path.abspath(video_output_dir)
 work_output_dir = os.path.join(script_dir, "../../work")
 work_output_dir = os.path.abspath(work_output_dir)
+
+
+_selected_video_set = set()
+_folder_key = None
+
+
+def reset_video_selection():
+    """重置视频选择状态，切换文件夹时调用"""
+    global _selected_video_set, _folder_key
+    _selected_video_set.clear()
+    _folder_key = None
+    import streamlit as st
+    st.session_state.pop('_grid_selected_videos', None)
+
+
+def _persist_selection():
+    """将已选视频记录写入 session_state"""
+    import streamlit as st
+    st.session_state['_grid_selected_videos'] = list(_selected_video_set)
+
+
+def _load_selection():
+    """从 session_state 恢复已选视频记录"""
+    import streamlit as st
+    if '_grid_selected_videos' in st.session_state:
+        _selected_video_set.update(st.session_state['_grid_selected_videos'])
 
 
 def get_video_files_from_folder(folder_path):
@@ -113,11 +140,12 @@ def extract_username_from_filename(filename):
 
 
 class VideoGridService:
-    def __init__(self, video_list, layout='4grid', background_music=None, bgm_volume=0.3):
+    def __init__(self, video_list, layout='4grid', background_music=None, bgm_volume=0.3, video_folder=None):
         self.video_list = video_list
         self.layout = layout
         self.background_music = background_music
         self.bgm_volume = bgm_volume
+        self.video_folder = video_folder
 
         self.fps = st.session_state.get("video_fps", 30)
 
@@ -132,22 +160,91 @@ class VideoGridService:
 
     def generate_grid_video(self):
         """生成宫格视频"""
-        if len(self.video_list) < self.required_count:
-            print(f"视频数量不足，需要 {self.required_count} 个视频，当前只有 {len(self.video_list)} 个")
+        _load_selection()
+
+        if self.video_folder:
+            current_key = self.video_folder
+        else:
+            current_key = None
+
+        global _selected_video_set, _folder_key
+        if _folder_key != current_key:
+            _selected_video_set.clear()
+            _folder_key = current_key
+            _persist_selection()
+
+        available = [v for v in self.video_list if v not in _selected_video_set]
+        if len(available) < self.required_count:
+            print(f"可用视频不足，需要 {self.required_count} 个，已选过 {len(_selected_video_set)} 个")
             return None
 
-        selected_videos = self.video_list[:self.required_count]
+        videos_by_duration = self._group_by_duration(available)
+        if not videos_by_duration:
+            print("无法获取视频时长信息")
+            return None
 
-        min_duration = float('inf')
-        for video in selected_videos:
-            duration = get_video_duration(video)
-            if duration:
-                min_duration = min(min_duration, duration)
+        duration_groups = list(videos_by_duration.keys())
+        random.shuffle(duration_groups)
 
-        if min_duration == float('inf'):
-            min_duration = 10.0
+        selected_videos = []
+        chosen_duration = None
+        for duration in duration_groups:
+            candidates = videos_by_duration[duration]
+            if len(candidates) >= self.required_count:
+                chosen = random.sample(candidates, self.required_count)
+                selected_videos = chosen
+                chosen_duration = duration
+                break
 
-        print(f"最短视频时长: {min_duration} 秒")
+        if not selected_videos:
+            print(f"没有找到足够的相同时长视频（至少需要 {self.required_count} 个相同时长）")
+            return None
+
+        _selected_video_set.update(selected_videos)
+        _persist_selection()
+        print(f"本轮选中 {len(selected_videos)} 个视频，时长: {chosen_duration:.2f}s，已累计选过 {len(_selected_video_set)} 个")
+
+        return self._do_grid(selected_videos, chosen_duration)
+
+    def _group_by_duration(self, videos):
+        """按视频时长分组，误差0.5秒内视为同组，只保留有足够候选视频的组"""
+        duration_map = {}
+        for video in videos:
+            dur = get_video_duration(video)
+            if dur is not None and dur > 0:
+                duration_map.setdefault(dur, []).append(video)
+
+        if not duration_map:
+            return {}
+
+        sorted_durations = sorted(duration_map.keys())
+        result = {}
+        checked = set()
+
+        for i, start_dur in enumerate(sorted_durations):
+            if start_dur in checked:
+                continue
+            group_durations = [start_dur]
+            checked.add(start_dur)
+            for other_dur in sorted_durations[i + 1:]:
+                if other_dur - start_dur <= 0.5:
+                    group_durations.append(other_dur)
+                    checked.add(other_dur)
+                else:
+                    break
+
+            if len(group_durations) >= self.required_count:
+                all_videos = []
+                for d in group_durations:
+                    all_videos.extend(duration_map[d])
+                result[start_dur] = all_videos
+
+        return result
+
+    def _do_grid(self, selected_videos, duration):
+        """执行宫格合成"""
+        min_duration = duration
+        print(f"视频时长: {min_duration} 秒")
 
         base_width, base_height = get_video_resolution(selected_videos[0])
         if not base_width or not base_height:

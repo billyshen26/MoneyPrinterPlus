@@ -37,6 +37,17 @@ default_bg_music_dir = os.path.abspath(default_bg_music_dir)
 load_session_state_from_yaml('05_first_visit')
 
 
+def _reset_grid_selection():
+    """重置视频选择状态（切换文件夹时调用）"""
+    from services.video.grid_service import reset_video_selection
+    reset_video_selection()
+
+
+def _reset_selection():
+    from services.video.grid_service import reset_video_selection
+    reset_video_selection()
+    st.rerun()
+
 def generate_grid_video(video_generator):
     save_session_state_to_yaml()
 
@@ -66,7 +77,8 @@ def generate_grid_video(video_generator):
                 video_list=video_files,
                 layout=layout,
                 background_music=background_music,
-                bgm_volume=bgm_volume
+                bgm_volume=bgm_volume,
+                video_folder=video_folder
             )
 
             st.write("正在生成宫格视频...")
@@ -91,8 +103,13 @@ with folder_container:
     video_folder = st.text_input(
         label="视频文件夹路径",
         placeholder="请输入视频文件夹路径",
-        key="video_grid_folder"
+        key="video_grid_folder",
+        on_change=_reset_grid_selection
     )
+
+    col_reset, _ = st.columns([1, 5])
+    with col_reset:
+        st.button("重置选择", on_click=_reset_selection, help="重置已选视频记录，重新开始随机选择")
 
     if video_folder and os.path.exists(video_folder):
         video_files = get_video_files_from_folder(video_folder)

@@ -290,9 +290,15 @@ with video_container:
     st.text_input(label=tr("Video Content Dir"), key="video_publish_content_dir",
                   value=get_content_location(), on_change=set_content_location, args=('video_publish_content_dir',))
     video_list = get_file_map_from_dir(st.session_state["video_publish_content_dir"], ".mp4,.mov")
+    current_file = st.session_state.get("video_publish_content_file")
+    if current_file not in video_list:
+        st.session_state["video_publish_content_file"] = list(video_list.keys())[0] if video_list else None
     st.selectbox(label=tr("Video File"), key="video_publish_content_file",
                  options=video_list, format_func=lambda x: video_list[x])
     file_list = get_file_map_from_dir(st.session_state["video_publish_content_dir"], ".txt")
+    current_text = st.session_state.get("video_publish_content_text")
+    if current_text not in file_list:
+        st.session_state["video_publish_content_text"] = list(file_list.keys())[0] if file_list else None
     st.selectbox(label=tr("Text File"), key="video_publish_content_text",
                  options=file_list, format_func=lambda x: file_list[x])
 
