@@ -35,147 +35,209 @@ from tools.file_utils import read_head, read_file_with_extra_enter, read_file_st
 
 
 def bilibili_publisher(driver, video_file, text_file):
-    # driver.switch_to.window(driver.window_handles[0])
-
-    # 打开新标签页并切common_config换到新标签页
+    # 打开新标签页并切换到新标签页
     driver.switch_to.new_window('tab')
 
     # 浏览器实例现在可以被重用，进行你的自动化操作
     driver.get(bilibili_site)
-    time.sleep(2)  # 等待2秒
+    time.sleep(3)  # 等待页面加载
 
     # 设置等待
-    wait = WebDriverWait(driver, 10)
+    wait = WebDriverWait(driver, 15)
 
-    # 上传视频按钮
-    # file_input = driver.find_element(By.NAME,'upload-btn')
-    file_input = driver.find_element(By.XPATH, '//*[@id="video-up-app"]/div[1]/div[2]/div/div[1]/div/div/input')
-    file_input.send_keys(video_file)
-    time.sleep(10)  # 等待
-    # 等待视频上传完毕
-    # wait.until(EC.presence_of_element_located((By.CLASS_NAME, 'semi-input semi-input-default')))
+    # 上传视频 - 使用正确的新版选择器
+    print("开始上传视频到 Bilibili...")
+    try:
+        # 新版 B 站使用隐藏的 input[type="file"] 上传
+        upload_input = driver.find_element(By.CSS_SELECTOR, 'input[type="file"][accept*="mp4"]')
+        print("找到文件上传输入框")
+        upload_input.send_keys(video_file)
+        print("视频上传中，请等待...")
+        time.sleep(15)  # 等待视频上传
+        print("视频上传完成")
+    except Exception as e:
+        print(f"视频上传失败: {e}")
+        try:
+            # 备选：直接找所有文件输入框
+            upload_inputs = driver.find_elements(By.CSS_SELECTOR, 'input[type="file"]')
+            if upload_inputs:
+                print(f"找到 {len(upload_inputs)} 个文件上传框，尝试第一个")
+                upload_inputs[0].send_keys(video_file)
+                print("视频上传中...")
+                time.sleep(15)
+        except Exception as e2:
+            print(f"备选上传也失败: {e2}")
+            return
+
+    # 等待表单加载
+    time.sleep(5)
 
     # 设置标题
-    title = driver.find_element(By.XPATH, '//*[@id="video-up-app"]/div[2]/div[1]/div[2]/div[3]/div/div[2]/div[1]/div/input')
-    print("clean bilibili title")
-    title.clear()
-    time.sleep(2)
-    print("clean bilibili title done")
-    
-    title_text = read_head(text_file)
-    use_common = st.session_state.get('video_publish_use_common_config')
-    if use_common:
-        common_title = st.session_state.get('video_publish_title_prefix')
-    else:
-        common_title = st.session_state.get('video_publish_bilibili_title_prefix')
-
-    # 标题有80字长度限制
-    if len(common_title + title_text) <= 80:
-        title.send_keys(common_title + title_text)
-    else:
-        title.send_keys(title_text)
-    time.sleep(2)
-    
-    #分区
-    section =  st.session_state.get('video_publish_enable_bilibili_section')
-    if section:
-        print("设置分区")
-        section_tag = driver.find_element(By.CLASS_NAME, 'select-controller')
-        print("section tag：" + str(section_tag))
-        actions = ActionChains(driver)
-        actions.move_to_element(section_tag).click().perform()
-        time.sleep(3)
-        section_level1 = st.session_state.get('video_publish_bilibili_section_level1')
-        section_level1_tag = driver.find_element(By.XPATH, f'//p[@class="f-item-content" and text()="{section_level1}"]')
+    try:
+        print("等待并设置标题...")
+        time.sleep(3)  # 等待表单加载
         
-        actions = ActionChains(driver)
-        actions.move_to_element(section_level1_tag).click().perform()
-        time.sleep(2)
+        # 新版 B 站标题输入框选择器
+        title_selectors = [
+            'input[placeholder*="标题"]',
+            'input[placeholder*="选"]',
+            '.title-input input',
+            'input.bili-input',
+            'input[class*="title"]'
+        ]
+        
+        title = None
+        for selector in title_selectors:
+            try:
+                title = driver.find_element(By.CSS_SELECTOR, selector)
+                print(f"找到标题输入框: {selector}")
+                break
+            except:
+                continue
+        
+        if title:
+            title_text = read_head(text_file)
+            use_common = st.session_state.get('video_publish_use_common_config')
+            if use_common:
+                common_title = st.session_state.get('video_publish_title_prefix')
+            else:
+                common_title = st.session_state.get('video_publish_bilibili_title_prefix')
 
-        section_level2 = st.session_state.get('video_publish_bilibili_section_level2')
-        section_level2_tag = driver.find_element(By.XPATH, f'//p[@class="item-main" and text()="{section_level2}"]')
-        actions = ActionChains(driver)
-        actions.move_to_element(section_level2_tag).click().perform()
-        time.sleep(1)
-    
-    # 设置tags
-    tags_content = driver.find_element(By.XPATH, '//input[@placeholder="按回车键Enter创建标签"]')
-    print("clean tags_content")
-
-    print("clean tags_content done")
-    # for 循环 执行 send_keys,删除自动生成的tag
-    for i in range(10):
-        tags_content.send_keys(Keys.BACK_SPACE)
-        time.sleep(1)
-    print(" tags_content back done")
-    
-    if use_common:
-        tags = st.session_state.get('video_publish_tags')
-    else:
-        tags = st.session_state.get('video_publish_bilibili_tags')
-    tags = tags.split()
-    i = 0
-    for tag in tags:
-        # bilibili接受10个标签
-        if i == 10:
-            break
-        is_firefox = st.session_state.get("video_publish_driver_type") == 'firefox'
-        # firefox没有原创按钮？
-        if not is_firefox:
-            print("tag:", tag)
-            tags_content.send_keys(' ')
-            tags_content.send_keys(tag)
-            time.sleep(2)
-            tags_content.send_keys(Keys.ENTER)
-            time.sleep(1)
-            tags_content.send_keys(' ')
+            # 清空并输入
+            title.clear()
+            time.sleep(0.5)
+            
+            # 标题有80字长度限制
+            if len(common_title + title_text) <= 80:
+                title.send_keys(common_title + title_text)
+            else:
+                title.send_keys(title_text)
+            print(f"标题设置完成")
             time.sleep(2)
         else:
-            print("firefox tag:", tag)
-            tags_content.send_keys(' ')
-            pyperclip.copy(tag)
-            action_chains.key_down(cmd_ctrl).send_keys('v').key_up(cmd_ctrl).perform()
+            print("未找到标题输入框")
+    except Exception as e:
+        print(f"标题设置失败: {e}")
+
+    # 设置标签
+    try:
+        print("开始设置标签...")
+        tags_selectors = [
+            'input[placeholder*="标签"]',
+            'input[placeholder*="Enter"]',
+            'input[placeholder*="回车"]',
+            '.tag-input input'
+        ]
+        
+        tags_input = None
+        for selector in tags_selectors:
+            try:
+                tags_input = driver.find_element(By.CSS_SELECTOR, selector)
+                print(f"找到标签输入框: {selector}")
+                break
+            except:
+                continue
+        
+        if tags_input:
+            # 清空现有标签
+            for _ in range(15):
+                tags_input.send_keys(Keys.BACKSPACE)
+                time.sleep(0.2)
+            
+            use_common = st.session_state.get('video_publish_use_common_config')
+            if use_common:
+                tags = st.session_state.get('video_publish_tags')
+            else:
+                tags = st.session_state.get('video_publish_bilibili_tags')
+            tags = tags.split()
+            
+            cmd_ctrl = Keys.COMMAND if sys.platform == 'darwin' else Keys.CONTROL
+            i = 0
+            for tag in tags:
+                if i >= 10:  # Bilibili 最多10个标签
+                    break
+                tag_clean = tag.strip()
+                if tag_clean:
+                    tags_input.send_keys(' ')
+                    pyperclip.copy(tag_clean)
+                    action = ActionChains(driver)
+                    action.key_down(cmd_ctrl).send_keys('v').key_up(cmd_ctrl)
+                    action.perform()
+                    time.sleep(0.5)
+                    tags_input.send_keys(Keys.ENTER)
+                    time.sleep(0.5)
+                    i += 1
+            print(f"标签设置完成: {i} 个")
+        else:
+            print("未找到标签输入框")
+    except Exception as e:
+        print(f"标签设置失败: {e}")
+
+    # 设置简介/内容
+    try:
+        print("开始设置简介...")
+        content_selectors = [
+            'textarea[placeholder*="简介"]',
+            'textarea[placeholder*="描述"]',
+            'textarea.bili-textarea',
+            '[contenteditable="true"]'
+        ]
+        
+        content = None
+        for selector in content_selectors:
+            try:
+                content = driver.find_element(By.CSS_SELECTOR, selector)
+                print(f"找到内容输入框: {selector}")
+                break
+            except:
+                continue
+        
+        if content:
+            content_text = read_file_start_with_secondline(text_file)
+            pyperclip.copy(content_text)
+            
+            # 点击激活
+            driver.execute_script("arguments[0].click();", content)
+            time.sleep(0.5)
+            
+            cmd_ctrl = Keys.COMMAND if sys.platform == 'darwin' else Keys.CONTROL
+            action = ActionChains(driver)
+            action.key_down(cmd_ctrl).send_keys('a').key_up(cmd_ctrl)  # 全选
+            action.key_down(cmd_ctrl).send_keys('v').key_up(cmd_ctrl)  # 粘贴
+            action.perform()
+            print("简介设置完成")
             time.sleep(2)
-            tags_content.send_keys(' ')
-            time.sleep(1) 
-        i = i + 1    
+        else:
+            print("未找到简介输入框")
+    except Exception as e:
+        print(f"简介设置失败: {e}")
 
-    # 设置内容
-    content = driver.find_element(By.XPATH, '//*[@id="video-up-app"]/div[2]/div[1]/div[2]/div[7]/div/div[2]/div/div[1]/div[1]')
-    content.click()
-    time.sleep(2)
-    cmd_ctrl = Keys.COMMAND if sys.platform == 'darwin' else Keys.CONTROL
-    # 将要粘贴的文本内容复制到剪贴板
-    content_text = read_file_start_with_secondline(text_file)
-    pyperclip.copy(content_text)
-    action_chains = webdriver.ActionChains(driver)
-    # 模拟实际的粘贴操作
-    action_chains.key_down(cmd_ctrl).send_keys('v').key_up(cmd_ctrl).perform()
-    time.sleep(2)
-
-    # # 设置合集
-    # if use_common:
-    #     collection = st.session_state.get('video_publish_collection_name')
-    # else:
-    #     collection = st.session_state.get('video_publish_douyin_collection_name')
-    # if collection:
-    #     collection_tag = driver.find_element(By.XPATH, '//div[contains(text(),"选择合集")]')
-    #     collection_tag.click()
-    #     time.sleep(1)
-    #     collection_to_select = driver.find_element(By.XPATH, f'//div[@class="semi-select-option collection-option"]//span[text()="{collection}"]')
-    #     collection_to_select.click()
-    #     time.sleep(1)
-    
-    # 发布 
-    publish_button = driver.find_element(By.CLASS_NAME, 'submit-add')
+    # 发布
     auto_publish = st.session_state.get('video_publish_auto_publish')
     if auto_publish:
-        print("auto publish")
-        publish_button.click()
-
-
-
-
-
+        print("开始自动发布...")
+        time.sleep(2)
+        try:
+            # 尝试多种发布按钮选择器
+            publish_selectors = [
+                '.submit-add',
+                '.bili-publish',
+                'button[class*="submit"]',
+                'button:contains("发布")'
+            ]
+            
+            for selector in publish_selectors:
+                try:
+                    publish_btn = driver.find_element(By.CSS_SELECTOR, selector)
+                    driver.execute_script("arguments[0].click();", publish_btn)
+                    print(f"发布按钮点击成功")
+                    break
+                except:
+                    continue
+            else:
+                print("未找到发布按钮")
+        except Exception as e:
+            print(f"发布失败: {e}")
+        print("请检查 Bilibili 页面确认发布状态")
 
 

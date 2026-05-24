@@ -327,6 +327,11 @@ with video_config_container:
     st.subheader(tr("Douyin Config"))
     st.checkbox(label=tr("Enable douyin"), key="video_publish_enable_douyin",
                 value=get_enable("douyin"), on_change=set_enable, args=('douyin', 'video_publish_enable_douyin'))
+    st.checkbox(label=tr("Auto Comment (after publish)"), key="video_publish_douyin_auto_comment",
+                help="发布后自动评论，@视频中的用户ID")
+    st.text_area(label=tr("Comment Template"), key="video_publish_douyin_comment_template",
+                 value="这也太有才了 @{} @{} @{} @{}，你也来看看！",
+                 help="评论内容，{{}}会被替换为视频中的用户名，支持最多4个@（4宫格）")
     if not st.session_state.get("video_publish_use_common_config"):
         st_columns = st.columns(3)
         with st_columns[0]:

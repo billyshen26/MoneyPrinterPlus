@@ -204,7 +204,13 @@ class VideoGridService:
         _persist_selection()
         print(f"本轮选中 {len(selected_videos)} 个视频，时长: {chosen_duration:.2f}s，已累计选过 {len(_selected_video_set)} 个")
 
-        return self._do_grid(selected_videos, chosen_duration)
+        result = self._do_grid(selected_videos, chosen_duration)
+        if result is None:
+            return None
+        final_video, usernames_file = result
+        if final_video and os.path.exists(final_video):
+            st.session_state['_grid_usernames_file'] = usernames_file
+        return final_video
 
     def _group_by_duration(self, videos):
         """按视频时长分组，误差0.5秒内视为同组，只保留有足够候选视频的组"""
@@ -243,6 +249,9 @@ class VideoGridService:
 
     def _do_grid(self, selected_videos, duration):
         """执行宫格合成"""
+        usernames = [extract_username_from_filename(v) for v in selected_videos]
+        usernames = [u for u in usernames if u]
+
         min_duration = duration
         print(f"视频时长: {min_duration} 秒")
 
@@ -258,6 +267,15 @@ class VideoGridService:
 
         random_name = random_with_system_time()
         output_video = os.path.join(video_output_dir, f"grid-{self.layout}-{random_name}.mp4")
+        usernames_file = os.path.join(video_output_dir, f"grid-{self.layout}-{random_name}.usernames")
+
+        if usernames:
+            try:
+                with open(usernames_file, 'w', encoding='utf-8') as f:
+                    f.write('\n'.join(usernames))
+                print(f"保存用户名列表: {usernames_file}")
+            except Exception as e:
+                print(f"保存用户名列表失败: {e}")
 
         scaled_videos = []
         for i, video in enumerate(selected_videos):
@@ -298,7 +316,7 @@ class VideoGridService:
         if final_video and self.background_music and os.path.exists(self.background_music):
             final_video = self._add_background_music(final_video, self.background_music, min_duration)
 
-        return final_video
+        return final_video, usernames_file
 
     def _render_username_image(self, username, output_path, width=288, font_size=24):
         """用 Pillow 把用户名渲染成黑底白字图片"""

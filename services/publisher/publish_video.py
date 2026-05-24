@@ -48,12 +48,15 @@ all_sites = ['xiaohongshu',
              ]
 
 
-def publish_to_platform(platform, driver, video_file, text_file):
+def publish_to_platform(platform, driver, video_file, text_file, usernames_file=None):
     """
     发布到指定平台的封装函数
     """
     try:
-        globals()[platform + '_publisher'](driver, video_file, text_file)  # 动态调用对应平台的发布函数
+        kwargs = {}
+        if platform == 'douyin' and usernames_file:
+            kwargs['usernames_file'] = usernames_file
+        globals()[platform + '_publisher'](driver, video_file, text_file, **kwargs)  # 动态调用对应平台的发布函数
     except Exception as e:
         print(platform, "got error")
         traceback.print_exc()  # 打印完整的异常跟踪信息
@@ -69,8 +72,13 @@ def publish_file():
     driver = init_driver()
     video_file = get_must_session_option('video_publish_content_file', "请选择要发布的视频文件")
     text_file = get_must_session_option('video_publish_content_text', "请选择要发布的内容文件")
+
+    usernames_file = video_file.rsplit('.', 1)[0] + '.usernames'
+    if not os.path.exists(usernames_file):
+        usernames_file = None
+
     if st.session_state.get("video_publish_enable_douyin"):
-        publish_to_platform('douyin', driver, video_file, text_file)
+        publish_to_platform('douyin', driver, video_file, text_file, usernames_file)
 
     if st.session_state.get("video_publish_enable_kuaishou"):
         publish_to_platform('kuaishou', driver, video_file, text_file)

@@ -21,11 +21,14 @@
 #
 #
 
-from selenium.webdriver import Keys
+from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.wait import WebDriverWait
 import streamlit as st
+import pyperclip
+import sys
+from selenium.webdriver import Keys
 
 import time
 
@@ -40,60 +43,154 @@ def xiaohongshu_publisher(driver, video_file, text_file):
 
     # 浏览器实例现在可以被重用，进行你的自动化操作
     driver.get(xiaohongshu_site)
-    time.sleep(2)  # 等待2秒
+    time.sleep(3)  # 等待页面加载
 
     # 设置等待
-    wait = WebDriverWait(driver, 10)
+    wait = WebDriverWait(driver, 15)
 
-    # 上传视频按钮
-    file_input = driver.find_element(By.CLASS_NAME, 'upload-input')
-    file_input.send_keys(video_file)
-    time.sleep(10)  # 等待
-    # 等待视频上传完毕
-    wait.until(EC.presence_of_element_located((By.CLASS_NAME, 'c-input_inner')))
+    # 检查视频是否已上传（通过检查页面是否有预览视频）
+    video_preview = None
+    try:
+        video_preview = driver.find_element(By.CSS_SELECTOR, '.preview-new .name')
+        print(f"检测到视频已上传: {video_preview.text}")
+    except:
+        pass
+
+    if not video_preview:
+        print("开始上传视频...")
+        try:
+            file_input = driver.find_element(By.CLASS_NAME, 'upload-input')
+            file_input.send_keys(video_file)
+            time.sleep(15)  # 等待视频上传
+            # 等待视频预览出现
+            wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, '.preview-new .name')))
+            print("视频上传完成")
+        except Exception as e:
+            print(f"视频上传失败: {e}")
+    else:
+        print("视频已存在，等待页面稳定...")
+        time.sleep(3)
+
+    time.sleep(2)
 
     # 设置标题
-    title = driver.find_element(By.CLASS_NAME, 'd-text')
-    title_text = read_head(text_file)
-    use_common = st.session_state.get('video_publish_use_common_config')
-    if use_common:
-        common_title = st.session_state.get('video_publish_title_prefix')
-    else:
-        common_title = st.session_state.get('video_publish_xiaohongshu_title_prefix')
-    # 标题有20字长度限制
-    if len(common_title + title_text) <= 20:
-        title.send_keys(common_title + title_text)
-    else:
-        title.send_keys(title_text)
-    time.sleep(2)
-
-    # 设置内容
-    content = driver.find_element(By.XPATH, '//*[@id="quillEditor"]/div')
-    content_text = read_file_start_with_secondline(text_file)
-    content.send_keys(content_text)
-    time.sleep(2)
-
-    # 设置tags
-    if use_common:
-        tags = st.session_state.get('video_publish_tags')
-    else:
-        tags = st.session_state.get('video_publish_xiaohongshu_tags')
-    tags = tags.split()
-    for tag in tags:
-        content.send_keys(tag)
-        time.sleep(2)
-        content.send_keys(Keys.ENTER)
+    try:
+        wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, '.d-text')))
         time.sleep(1)
-        content.send_keys(' ')
+        
+        title = driver.find_element(By.CSS_SELECTOR, '.d-text')
+        title_text = read_head(text_file)
+        use_common = st.session_state.get('video_publish_use_common_config')
+        if use_common:
+            common_title = st.session_state.get('video_publish_title_prefix')
+        else:
+            common_title = st.session_state.get('video_publish_xiaohongshu_title_prefix')
+        
+        # 先清空标题
+        title.clear()
+        time.sleep(0.5)
+        
+        # 标题有20字长度限制
+        if len(common_title + title_text) <= 20:
+            title.send_keys(common_title + title_text)
+        else:
+            title.send_keys(title_text)
+        print(f"标题设置完成: {common_title + title_text if len(common_title + title_text) <= 20 else title_text}")
+        time.sleep(2)
+    except Exception as e:
+        print(f"标题设置失败: {e}")
+
+    # 设置内容 - 使用模拟键盘输入方式
+    try:
+        # 先滚动到编辑区域上方
+        driver.execute_script("window.scrollTo(0, 400);")
+        time.sleep(1)
+
+        # 读取内容
+        content_text = read_file_start_with_secondline(text_file)
+        use_common = st.session_state.get('video_publish_use_common_config')
+        if use_common:
+            tags = st.session_state.get('video_publish_tags')
+        else:
+            tags = st.session_state.get('video_publish_xiaohongshu_tags')
+        tags = tags.split()
+
+        # 获取话题标签（去掉#号）
+        tag_texts = [tag.replace('#', '').strip() for tag in tags]
+
+        print(f"开始设置正文内容，长度: {len(content_text)}")
+
+        # 找到编辑器并点击激活
+        editor = driver.find_element(By.CSS_SELECTOR, '.tiptap.ProseMirror')
+        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", editor)
+        time.sleep(1)
+        
+        # 点击编辑器激活
+        driver.execute_script("arguments[0].click();", editor)
+        time.sleep(1)
+
+        # 使用 ActionChains 模拟键盘输入
+        import pyperclip
+        import sys
+        from selenium.webdriver import Keys
+        
+        # 先复制内容到剪贴板
+        pyperclip.copy(content_text)
+        
+        # Ctrl+V 粘贴
+        cmd_ctrl = Keys.COMMAND if sys.platform == 'darwin' else Keys.CONTROL
+        action_chains = webdriver.ActionChains(driver)
+        action_chains.key_down(cmd_ctrl).send_keys('v').key_up(cmd_ctrl)
+        action_chains.perform()
         time.sleep(2)
 
+        # 输入话题标签
+        for tag in tag_texts:
+            # 按回车换行
+            action_chains.send_keys(Keys.RETURN)
+            action_chains.perform()
+            time.sleep(0.5)
+            
+            # 输入话题（带#号）
+            pyperclip.copy(f'#{tag}')
+            action_chains.key_down(cmd_ctrl).send_keys('v').key_up(cmd_ctrl)
+            action_chains.perform()
+            time.sleep(0.5)
 
-    # 发布
-    publish_button = driver.find_element(By.XPATH, '//button[contains(@class, "publishBtn")]')
+        print("正文内容设置完成")
+    except Exception as e:
+        print(f"正文内容设置失败: {e}")
+        import traceback
+        traceback.print_exc()
+
+    # 发布 - 通过 shadow DOM
     auto_publish = st.session_state.get('video_publish_auto_publish')
     if auto_publish:
-        print("auto publish")
-        publish_button.click()
+        print("开始自动发布...")
+        time.sleep(2)
+        
+        # 先滚动到页面底部，确保发布按钮可见
+        driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+        time.sleep(1)
+        
+        # 尝试点击发布按钮
+        driver.execute_script("""
+            var btn = document.querySelector('xhs-publish-btn');
+            if (btn && btn.shadowRoot) {
+                var publishBtn = btn.shadowRoot.querySelector('.bg-red');
+                if (publishBtn) {
+                    publishBtn.click();
+                    console.log('发布按钮已点击');
+                } else {
+                    console.log('未找到发布按钮 .bg-red');
+                    // 打印 shadowRoot 内容
+                    console.log('Shadow root children:', btn.shadowRoot.innerHTML);
+                }
+            } else {
+                console.log('未找到 xhs-publish-btn');
+            }
+        """)
+        print("发布操作已完成，请检查浏览器")
 
 
 

@@ -21,7 +21,9 @@
 #
 #
 
+import os
 import sys
+import traceback
 
 import pyperclip
 from selenium import webdriver
@@ -36,7 +38,25 @@ from config.config import douyin_site
 from tools.file_utils import read_head, read_file_with_extra_enter, read_file_start_with_secondline
 
 
-def douyin_publisher(driver, video_file, text_file):
+def _read_usernames(usernames_file):
+    """读取用户名列表"""
+    if not usernames_file or not os.path.exists(usernames_file):
+        return []
+    try:
+        with open(usernames_file, 'r', encoding='utf-8') as f:
+            return [line.strip() for line in f if line.strip()]
+    except Exception:
+        return []
+
+
+def _format_comment(template, usernames):
+    """把模板中的 {} 依次替换为用户名"""
+    if not usernames:
+        return None
+    return template.format(*usernames)
+
+
+def douyin_publisher(driver, video_file, text_file, usernames_file=None):
 
     # driver.switch_to.window(driver.window_handles[0])
 
@@ -144,9 +164,50 @@ def douyin_publisher(driver, video_file, text_file):
     # 发布
     publish_button = driver.find_element(By.CSS_SELECTOR, 'button.button-dhlUZE.primary-cECiOJ')
     auto_publish = st.session_state.get('video_publish_auto_publish')
+    auto_comment = st.session_state.get('video_publish_douyin_auto_comment')
     if auto_publish:
         print("auto publish")
         publish_button.click()
+        time.sleep(3)
+
+        if auto_comment and usernames_file:
+            try:
+                comment_template = st.session_state.get('video_publish_douyin_comment_template', '这也太有才了 @{} @{} @{} @{}，你也来看看！')
+                usernames = _read_usernames(usernames_file)
+                if usernames:
+                    comment_text = _format_comment(comment_template, usernames)
+                    if comment_text:
+                        time.sleep(5)
+                        current_url = driver.current_url
+                        print(f"当前页面: {current_url}")
+                        # 直接在发布页面评论
+                        _post_douyin_comment(driver, comment_text)
+            except Exception as e:
+                print(f"自动评论失败: {e}")
+                traceback.print_exc()
+
+
+def _post_douyin_comment(driver, comment_text):
+    """在抖音视频页面发布评论"""
+    try:
+        time.sleep(3)
+        # 尝试点击评论区域
+        comment_area = driver.find_element(By.XPATH, '//div[@placeholder="发友善评论~"]')
+        comment_area.click()
+        time.sleep(2)
+        pyperclip.copy(comment_text)
+        cmd_ctrl = Keys.COMMAND if sys.platform == 'darwin' else Keys.CONTROL
+        action_chains = webdriver.ActionChains(driver)
+        action_chains.key_down(cmd_ctrl).send_keys('v').key_up(cmd_ctrl).perform()
+        time.sleep(2)
+        # 发送评论
+        send_btn = driver.find_element(By.XPATH, '//button[contains(@class, "comment-send")]')
+        send_btn.click()
+        time.sleep(2)
+        print(f"评论已发送: {comment_text}")
+    except Exception as e:
+        print(f"评论发送失败: {e}")
+        traceback.print_exc()
 
 
 
