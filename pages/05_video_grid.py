@@ -26,7 +26,7 @@ import streamlit as st
 
 from config.config import app_title, load_session_state_from_yaml, save_session_state_to_yaml
 from pages.common import common_ui
-from services.video.grid_service import get_video_files_from_folder, extract_audio_from_video, VideoGridService
+from services.video.grid_service import get_video_files_from_folder, get_available_videos, extract_audio_from_video, VideoGridService, reset_used_videos
 
 script_path = os.path.abspath(__file__)
 script_dir = os.path.dirname(script_path)
@@ -44,8 +44,9 @@ def _reset_grid_selection():
 
 
 def _reset_selection():
-    from services.video.grid_service import reset_video_selection
+    from services.video.grid_service import reset_video_selection, reset_used_videos
     reset_video_selection()
+    reset_used_videos()
     st.rerun()
 
 def generate_grid_video(video_generator):
@@ -56,9 +57,11 @@ def generate_grid_video(video_generator):
         st.error("请输入有效的视频文件夹路径")
         return
 
-    video_files = get_video_files_from_folder(video_folder)
+    # 获取可用视频（排除已使用的）
+    video_files = get_available_videos(video_folder)
     if len(video_files) < 4:
-        st.error(f"视频文件夹中需要至少4个视频文件，当前只有 {len(video_files)} 个")
+        used_count = len(get_video_files_from_folder(video_folder)) - len(video_files)
+        st.error(f"可用视频不足，需要至少4个。当前剩余 {len(video_files)} 个视频，已使用 {used_count} 个。请添加更多视频或重置使用记录。")
         return
 
     layout = st.session_state.get("video_grid_layout", "4grid")
@@ -112,13 +115,20 @@ with folder_container:
         st.button("重置选择", on_click=_reset_selection, help="重置已选视频记录，重新开始随机选择")
 
     if video_folder and os.path.exists(video_folder):
-        video_files = get_video_files_from_folder(video_folder)
-        st.info(f"找到 {len(video_files)} 个视频文件")
-
-        if len(video_files) >= 4:
-            st.success("视频数量足够，可以生成4宫格或9宫格视频")
+        all_videos = get_video_files_from_folder(video_folder)
+        available_videos = get_available_videos(video_folder)
+        used_count = len(all_videos) - len(available_videos)
+        
+        if used_count > 0:
+            st.info(f"共 {len(all_videos)} 个视频，已使用 {used_count} 个，剩余 {len(available_videos)} 个可用")
         else:
-            st.warning("视频数量不足，至少需要4个视频文件")
+            st.info(f"找到 {len(all_videos)} 个视频文件")
+
+        if len(all_videos) >= 4:
+            if len(available_videos) >= 4:
+                st.success(f"视频数量足够，可以生成4宫格或9宫格视频")
+            else:
+                st.warning(f"可用视频不足！剩余 {len(available_videos)} 个，至少需要4个。请重置使用记录或添加更多视频。")
 
 config_container = st.container(border=True)
 with config_container:
@@ -142,6 +152,19 @@ with config_container:
             options=[20, 25, 30],
             help="输出视频的帧率"
         )
+
+    st.markdown("---")
+    st.toggle(
+        label="视频依次播放（关闭则同时播放）",
+        key="video_grid_sequential_play",
+        help="开启后，4个视频会依次播放，每个播放时其他视频静止"
+    )
+    
+    st.toggle(
+        label="允许视频重复使用",
+        key="video_grid_allow_reuse",
+        help="开启后，视频可以被重复使用；关闭则每个视频只能使用一次"
+    )
 
     st.markdown("---")
     st.subheader("背景音乐设置")

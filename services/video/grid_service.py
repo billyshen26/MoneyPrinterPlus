@@ -42,6 +42,7 @@ work_output_dir = os.path.abspath(work_output_dir)
 
 _selected_video_set = set()
 _folder_key = None
+_used_videos_file = os.path.join(script_dir, "../../config/used_videos.json")
 
 
 def reset_video_selection():
@@ -64,6 +65,53 @@ def _load_selection():
     import streamlit as st
     if '_grid_selected_videos' in st.session_state:
         _selected_video_set.update(st.session_state['_grid_selected_videos'])
+
+
+def load_used_videos():
+    """从文件加载已使用的视频记录"""
+    import json
+    used_videos = set()
+    if os.path.exists(_used_videos_file):
+        try:
+            with open(_used_videos_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                used_videos = set(data.get('used_videos', []))
+        except Exception as e:
+            print(f"加载已使用视频失败: {e}")
+    return used_videos
+
+
+def save_used_videos(used_videos):
+    """保存已使用的视频记录到文件"""
+    import json
+    try:
+        os.makedirs(os.path.dirname(_used_videos_file), exist_ok=True)
+        with open(_used_videos_file, 'w', encoding='utf-8') as f:
+            json.dump({'used_videos': list(used_videos)}, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"保存已使用视频失败: {e}")
+
+
+def mark_videos_as_used(video_paths):
+    """标记视频为已使用"""
+    used_videos = load_used_videos()
+    for video_path in video_paths:
+        used_videos.add(os.path.abspath(video_path))
+    save_used_videos(used_videos)
+
+
+def get_available_videos(folder_path):
+    """获取可用视频（排除已使用的）"""
+    all_videos = get_video_files_from_folder(folder_path)
+    used_videos = load_used_videos()
+    available = [v for v in all_videos if os.path.abspath(v) not in used_videos]
+    return available
+
+
+def reset_used_videos():
+    """重置已使用视频记录（清空记录）"""
+    save_used_videos(set())
+    print("已重置视频使用记录")
 
 
 def get_video_files_from_folder(folder_path):
@@ -103,12 +151,21 @@ def extract_audio_from_video(video_file, output_audio=None):
 
 def get_video_duration(video_file):
     """获取视频时长（秒）"""
-    command = ['ffprobe', '-i', video_file, '-show_entries', 'format=duration', '-v', 'quiet', '-of', 'csv=p=0']
-    result = subprocess.run(command, capture_output=True, text=True, encoding='utf-8', errors='replace')
     try:
-        duration = float(result.stdout.strip())
-        return duration
-    except:
+        command = ['ffprobe', '-v', 'error', '-show_entries', 'format=duration', 
+                   '-of', 'default=noprint_wrappers=1:nokey=1', video_file]
+        result = subprocess.run(command, capture_output=True, text=True, encoding='utf-8', errors='replace')
+        if result.returncode != 0:
+            print(f"ffprobe 错误: {result.stderr}")
+            return None
+        output = result.stdout.strip()
+        if not output:
+            print(f"ffprobe 无输出 for: {video_file}")
+            return None
+        duration = float(output)
+        return duration if duration > 0 else None
+    except Exception as e:
+        print(f"获取视频时长异常: {e}")
         return None
 
 
@@ -173,87 +230,42 @@ class VideoGridService:
             _folder_key = current_key
             _persist_selection()
 
+        # 直接获取可用视频
+        if self.layout == '4grid':
+            required = 4
+        else:
+            required = 9
+            
         available = [v for v in self.video_list if v not in _selected_video_set]
-        if len(available) < self.required_count:
-            print(f"可用视频不足，需要 {self.required_count} 个，已选过 {len(_selected_video_set)} 个")
+        if len(available) < required:
+            print(f"可用视频不足，需要 {required} 个，已选过 {len(_selected_video_set)} 个")
             return None
 
-        videos_by_duration = self._group_by_duration(available)
-        if not videos_by_duration:
-            print("无法获取视频时长信息")
-            return None
-
-        duration_groups = list(videos_by_duration.keys())
-        random.shuffle(duration_groups)
-
-        selected_videos = []
-        chosen_duration = None
-        for duration in duration_groups:
-            candidates = videos_by_duration[duration]
-            if len(candidates) >= self.required_count:
-                chosen = random.sample(candidates, self.required_count)
-                selected_videos = chosen
-                chosen_duration = duration
-                break
-
-        if not selected_videos:
-            print(f"没有找到足够的相同时长视频（至少需要 {self.required_count} 个相同时长）")
-            return None
-
+        # 随机选择所需数量的视频
+        selected_videos = random.sample(available, required)
+        
         _selected_video_set.update(selected_videos)
         _persist_selection()
-        print(f"本轮选中 {len(selected_videos)} 个视频，时长: {chosen_duration:.2f}s，已累计选过 {len(_selected_video_set)} 个")
+        print(f"本轮选中 {len(selected_videos)} 个视频")
 
-        result = self._do_grid(selected_videos, chosen_duration)
+        # 执行宫格合成
+        result = self._do_grid(selected_videos)
         if result is None:
             return None
         final_video, usernames_file = result
         if final_video and os.path.exists(final_video):
             st.session_state['_grid_usernames_file'] = usernames_file
+            # 根据开关决定是否标记视频为已使用
+            allow_reuse = st.session_state.get('video_grid_allow_reuse', False)
+            if not allow_reuse:
+                mark_videos_as_used(selected_videos)
+                print(f"已记录 {len(selected_videos)} 个视频为已使用")
         return final_video
 
-    def _group_by_duration(self, videos):
-        """按视频时长分组，误差0.5秒内视为同组，只保留有足够候选视频的组"""
-        duration_map = {}
-        for video in videos:
-            dur = get_video_duration(video)
-            if dur is not None and dur > 0:
-                duration_map.setdefault(dur, []).append(video)
-
-        if not duration_map:
-            return {}
-
-        sorted_durations = sorted(duration_map.keys())
-        result = {}
-        checked = set()
-
-        for i, start_dur in enumerate(sorted_durations):
-            if start_dur in checked:
-                continue
-            group_durations = [start_dur]
-            checked.add(start_dur)
-            for other_dur in sorted_durations[i + 1:]:
-                if other_dur - start_dur <= 0.5:
-                    group_durations.append(other_dur)
-                    checked.add(other_dur)
-                else:
-                    break
-
-            if len(group_durations) >= self.required_count:
-                all_videos = []
-                for d in group_durations:
-                    all_videos.extend(duration_map[d])
-                result[start_dur] = all_videos
-
-        return result
-
-    def _do_grid(self, selected_videos, duration):
+    def _do_grid(self, selected_videos):
         """执行宫格合成"""
         usernames = [extract_username_from_filename(v) for v in selected_videos]
         usernames = [u for u in usernames if u]
-
-        min_duration = duration
-        print(f"视频时长: {min_duration} 秒")
 
         base_width, base_height = get_video_resolution(selected_videos[0])
         if not base_width or not base_height:
@@ -297,15 +309,21 @@ class VideoGridService:
                         pass
             return None
 
+        # 根据开关选择创建方式
+        sequential_play = st.session_state.get('video_grid_sequential_play', False)
         if self.layout == '4grid':
-            final_video = self._create_4grid(scaled_videos, output_width, output_height, min_duration, output_video)
+            if sequential_play:
+                final_video = self._create_4grid_sequential(scaled_videos, output_width, output_height, selected_videos)
+            else:
+                final_video = self._create_4grid(scaled_videos, output_width, output_height)
         else:
-            final_video = self._create_9grid(scaled_videos, output_width, output_height, min_duration, output_video)
+            final_video = self._create_9grid(scaled_videos, output_width, output_height)
 
         if final_video and os.path.exists(final_video) and os.path.getsize(final_video) == 0:
             print(f"错误: 宫格视频 {final_video} 为空，生成失败")
             return None
 
+        # 清理缩放后的临时视频
         for scaled in scaled_videos:
             if os.path.exists(scaled):
                 try:
@@ -314,14 +332,15 @@ class VideoGridService:
                     pass
 
         if final_video and self.background_music and os.path.exists(self.background_music):
-            final_video = self._add_background_music(final_video, self.background_music, min_duration)
+            final_video = self._add_background_music(final_video, self.background_music)
 
         return final_video, usernames_file
 
     def _render_username_image(self, username, output_path, width=288, font_size=24):
-        """用 Pillow 把用户名渲染成黑底白字图片"""
+        """用 Pillow 把用户名渲染成白字透明底图片"""
         try:
-            img = Image.new('RGB', (width, font_size + 10), color=(0, 0, 0))
+            # 使用透明背景
+            img = Image.new('RGBA', (width, font_size + 16), color=(0, 0, 0, 0))
             draw = ImageDraw.Draw(img)
             font = None
             for fp in ['C:/Windows/Fonts/msyh.ttc', 'C:/Windows/Fonts/simhei.ttf', 'C:/Windows/Fonts/simsun.ttc']:
@@ -334,8 +353,9 @@ class VideoGridService:
             text_w = bbox[2] - bbox[0]
             text_h = bbox[3] - bbox[1]
             x = (width - text_w) // 2
-            y = 0
-            draw.text((x, y), username, fill=(255, 255, 255), font=font)
+            y = 4
+            # 白字，带黑色描边
+            draw.text((x, y), username, fill=(255, 255, 255), font=font, stroke_width=2, stroke_fill=(0, 0, 0))
             img.save(output_path)
             return True
         except Exception as e:
@@ -369,10 +389,12 @@ class VideoGridService:
             img_path = generate_temp_filename(input_video, "_username.png", work_output_dir)
             ok = self._render_username_image(username, img_path, width=width)
             if ok:
+                # 位置调整：中上部，距顶部约5%的位置
+                overlay_y = height * 0.05  # 视频高度的5%位置
                 overlay_cmd = [
                     'ffmpeg', '-i', scaled_path,
                     '-i', img_path,
-                    '-filter_complex', '[0:v][1:v]overlay=(W-w)/2:(H-h)',
+                    '-filter_complex', f'[0:v][1:v]overlay=(W-w)/2:{int(overlay_y)}',
                     '-c:v', 'libx264', '-preset', 'fast',
                     '-y', output_video
                 ]
@@ -403,35 +425,53 @@ class VideoGridService:
                 pass
             return True
 
-    def _create_4grid(self, scaled_videos, output_width, output_height, duration, output_video):
-        """创建4宫格视频"""
-        left_top = scaled_videos[0]
-        right_top = scaled_videos[1]
-        left_bottom = scaled_videos[2]
-        right_bottom = scaled_videos[3]
+    def _create_4grid(self, scaled_videos, output_width, output_height):
+        """创建4宫格视频，4个视频同时播放"""
+        v1 = scaled_videos[0]
+        v2 = scaled_videos[1]
+        v3 = scaled_videos[2]
+        v4 = scaled_videos[3]
 
+        random_name = random_with_system_time()
+        output_video = os.path.join(video_output_dir, f"grid-4grid-{random_name}.mp4")
+        
+        # 先获取每个视频的时长，找出最长的
+        def get_duration(video):
+            cmd = ['ffprobe', '-v', 'error', '-show_entries', 'format=duration', 
+                   '-of', 'default=noprint_wrappers=1:nokey=1', video]
+            result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace')
+            try:
+                return float(result.stdout.strip())
+            except:
+                return 0
+        
+        durations = [get_duration(v) for v in [v1, v2, v3, v4]]
+        max_duration = max(durations) if durations else 10
+        print(f"视频时长: {durations}, 最长: {max_duration}")
+        
+        # 让所有视频循环到最长时长，然后合并
         filter_complex = f"""
-        [0:v]setpts=PTS-STARTPTS[left_top];
-        [1:v]setpts=PTS-STARTPTS[right_top];
-        [2:v]setpts=PTS-STARTPTS[left_bottom];
-        [3:v]setpts=PTS-STARTPTS[right_bottom];
-        [left_top][right_top]hstack=inputs=2[top_row];
-        [left_bottom][right_bottom]hstack=inputs=2[bottom_row];
-        [top_row][bottom_row]vstack=inputs=2[out]
+        [0:v]trim=0:{max_duration},setpts=PTS-STARTPTS,loop=0:size=0:duration={int(max_duration)+1}[v1];
+        [1:v]trim=0:{max_duration},setpts=PTS-STARTPTS,loop=0:size=0:duration={int(max_duration)+1}[v2];
+        [2:v]trim=0:{max_duration},setpts=PTS-STARTPTS,loop=0:size=0:duration={int(max_duration)+1}[v3];
+        [3:v]trim=0:{max_duration},setpts=PTS-STARTPTS,loop=0:size=0:duration={int(max_duration)+1}[v4];
+        [v1][v2]hstack=inputs=2[top];
+        [v3][v4]hstack=inputs=2[bottom];
+        [top][bottom]vstack=inputs=2[out]
         """
 
         command = [
             'ffmpeg',
-            '-i', left_top,
-            '-i', right_top,
-            '-i', left_bottom,
-            '-i', right_bottom,
+            '-i', v1,
+            '-i', v2,
+            '-i', v3,
+            '-i', v4,
             '-filter_complex', filter_complex,
             '-map', '[out]',
-            '-t', str(duration),
             '-r', str(self.fps),
             '-c:v', 'libx264', '-preset', 'fast',
             '-pix_fmt', 'yuv420p',
+            '-t', str(max_duration),
             '-y',
             output_video
         ]
@@ -442,7 +482,130 @@ class VideoGridService:
 
         return output_video if os.path.exists(output_video) else None
 
-    def _create_9grid(self, scaled_videos, output_width, output_height, duration, output_video):
+    def _create_4grid_sequential(self, scaled_videos, output_width, output_height, original_videos):
+        """创建4宫格视频，4个视频依次播放（每个播放时其他3个静止）"""
+        import uuid
+        
+        cell_w = output_width // 2
+        cell_h = output_height // 2
+        
+        # 获取每个视频的时长
+        def get_duration(video):
+            cmd = ['ffprobe', '-v', 'error', '-show_entries', 'format=duration', 
+                   '-of', 'default=noprint_wrappers=1:nokey=1', video]
+            result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace')
+            try:
+                return float(result.stdout.strip())
+            except:
+                return 10
+        
+        durations = [get_duration(v) for v in scaled_videos]
+        print(f"依次播放：每个视频时长 {durations}, 总时长: {sum(durations):.1f}秒")
+        
+        # 为每个视频截取静态帧
+        def get_frame(video, time_pos, output_path):
+            cmd = ['ffmpeg', '-i', video, '-ss', str(time_pos), '-vframes', '1', '-y', output_path]
+            subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace')
+            return output_path if os.path.exists(output_path) else video
+        
+        frames = []
+        for i, v in enumerate(scaled_videos):
+            frame_path = os.path.join(work_output_dir, f"frame_{i}_{uuid.uuid4().hex[:8]}.png")
+            get_frame(v, 0.5, frame_path)
+            frames.append(frame_path)
+        
+        # 为每个时间段创建4宫格片段（保留活动视频的音频）
+        segments = []
+        for seg_idx in range(4):
+            active_video_idx = seg_idx
+            seg_output = os.path.join(work_output_dir, f"seg_{seg_idx}_{uuid.uuid4().hex[:8]}.mp4")
+            
+            # 计算活动视频的 overlay 位置
+            overlay_x = (active_video_idx % 2) * cell_w
+            overlay_y = (active_video_idx // 2) * cell_h
+            
+            vf = f'scale={cell_w}:{cell_h}'
+            
+            filter_complex = f"""
+            [0:v]{vf}[f0];
+            [1:v]{vf}[f1];
+            [2:v]{vf}[f2];
+            [3:v]{vf}[f3];
+            [f0][f1]hstack=inputs=2[top_frame];
+            [f2][f3]hstack=inputs=2[bottom_frame];
+            [top_frame][bottom_frame]vstack=inputs=2[bg];
+            [4:v]{vf}[active];
+            [bg][active]overlay={overlay_x}:{overlay_y}[out]
+            """
+            
+            # 4个静态帧 + 1个活动视频（保留音频）
+            cmd = [
+                'ffmpeg',
+                '-i', frames[0],
+                '-i', frames[1],
+                '-i', frames[2],
+                '-i', frames[3],
+                '-i', scaled_videos[active_video_idx],
+                '-filter_complex', filter_complex,
+                '-map', '[out]',
+                '-map', '4:a?',  # 保留活动视频的音频
+                '-t', str(durations[active_video_idx]),
+                '-r', str(self.fps),
+                '-c:v', 'libx264', '-preset', 'fast',
+                '-pix_fmt', 'yuv420p',
+                '-c:a', 'aac',
+                '-y', seg_output
+            ]
+            subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace')
+            
+            if os.path.exists(seg_output):
+                segments.append(seg_output)
+        
+        if len(segments) < 4:
+            print(f"创建片段失败，只有 {len(segments)} 个")
+            return None
+        
+        # 合并所有片段（混合音频）
+        concat_list = os.path.join(work_output_dir, f"concat_{uuid.uuid4().hex[:8]}.txt")
+        with open(concat_list, 'w', encoding='utf-8') as f:
+            for seg in segments:
+                f.write(f"file '{seg}'\n")
+        
+        random_name = random_with_system_time()
+        output_video = os.path.join(video_output_dir, f"grid-4grid-{random_name}.mp4")
+        
+        command = [
+            'ffmpeg', '-f', 'concat', '-safe', '0',
+            '-i', concat_list,
+            '-c:v', 'libx264', '-preset', 'fast',
+            '-pix_fmt', 'yuv420p',
+            '-c:a', 'aac',
+            '-y', output_video
+        ]
+        print("创建4宫格(依次播放):", output_video)
+        result = subprocess.run(command, capture_output=True, text=True, encoding='utf-8', errors='replace')
+        
+        # 清理临时文件
+        for f in segments + [concat_list]:
+            try:
+                if os.path.exists(f):
+                    os.remove(f)
+            except:
+                pass
+        for f in frames:
+            try:
+                if os.path.exists(f):
+                    os.remove(f)
+            except:
+                pass
+        
+        if result.returncode != 0:
+            print(f"创建4宫格(依次播放)失败: {result.stderr}")
+            return None
+
+        return output_video if os.path.exists(output_video) else None
+
+    def _create_9grid(self, scaled_videos, output_width, output_height):
         """创建9宫格视频"""
         v1 = scaled_videos[0]
         v2 = scaled_videos[1]
@@ -454,19 +617,13 @@ class VideoGridService:
         v8 = scaled_videos[7]
         v9 = scaled_videos[8]
 
+        random_name = random_with_system_time()
+        output_video = os.path.join(video_output_dir, f"grid-9grid-{random_name}.mp4")
+
         filter_complex = f"""
-        [0:v]setpts=PTS-STARTPTS[v1];
-        [1:v]setpts=PTS-STARTPTS[v2];
-        [2:v]setpts=PTS-STARTPTS[v3];
-        [3:v]setpts=PTS-STARTPTS[v4];
-        [4:v]setpts=PTS-STARTPTS[v5];
-        [5:v]setpts=PTS-STARTPTS[v6];
-        [6:v]setpts=PTS-STARTPTS[v7];
-        [7:v]setpts=PTS-STARTPTS[v8];
-        [8:v]setpts=PTS-STARTPTS[v9];
-        [v1][v2][v3]hstack=inputs=3[row1];
-        [v4][v5][v6]hstack=inputs=3[row2];
-        [v7][v8][v9]hstack=inputs=3[row3];
+        [0:v][1:v][2:v]hstack=inputs=3[row1];
+        [3:v][4:v][5:v]hstack=inputs=3[row2];
+        [6:v][7:v][8:v]hstack=inputs=3[row3];
         [row1][row2][row3]vstack=inputs=3[out]
         """
 
@@ -483,7 +640,6 @@ class VideoGridService:
             '-i', v9,
             '-filter_complex', filter_complex,
             '-map', '[out]',
-            '-t', str(duration),
             '-r', str(self.fps),
             '-c:v', 'libx264', '-preset', 'fast',
             '-pix_fmt', 'yuv420p',
@@ -497,7 +653,7 @@ class VideoGridService:
 
         return output_video if os.path.exists(output_video) else None
 
-    def _add_background_music(self, video_file, audio_file, duration):
+    def _add_background_music(self, video_file, audio_file):
         """添加背景音乐"""
         output_file = generate_temp_filename(video_file, "_with_bgm.mp4", work_output_dir)
 
@@ -523,7 +679,6 @@ class VideoGridService:
             '-filter_complex', filter_complex,
             '-map', '0:v',
             '-map', map_audio,
-            '-t', str(duration),
             '-c:v', 'copy',
             '-shortest',
             '-y',
