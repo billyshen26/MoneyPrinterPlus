@@ -267,15 +267,14 @@ class VideoGridService:
         usernames = [extract_username_from_filename(v) for v in selected_videos]
         usernames = [u for u in usernames if u]
 
-        base_width, base_height = get_video_resolution(selected_videos[0])
-        if not base_width or not base_height:
-            base_width, base_height = 1920, 1080
-
-        cell_width = base_width // self.cols
-        cell_height = base_height // self.rows
-
-        output_width = cell_width * self.cols
-        output_height = cell_height * self.rows
+        # 获取分辨率设置
+        resolution = st.session_state.get('video_grid_resolution', '1080p')
+        resolution_map = {'1080p': (1920, 1080), '720p': (1280, 720), '4k': (3840, 2160)}
+        output_width, output_height = resolution_map.get(resolution, (1920, 1080))
+        
+        # 每个格子的分辨率
+        cell_width = output_width // self.cols
+        cell_height = output_height // self.rows
 
         random_name = random_with_system_time()
         output_video = os.path.join(video_output_dir, f"grid-{self.layout}-{random_name}.mp4")
@@ -435,6 +434,11 @@ class VideoGridService:
         random_name = random_with_system_time()
         output_video = os.path.join(video_output_dir, f"grid-4grid-{random_name}.mp4")
         
+        # 获取码率设置
+        bitrate_setting = st.session_state.get('video_grid_bitrate', '中 (5Mbps)')
+        bitrate_map = {'低 (2Mbps)': '2M', '中 (5Mbps)': '5M', '高 (10Mbps)': '10M'}
+        bitrate = bitrate_map.get(bitrate_setting, '5M')
+        
         # 先获取每个视频的时长，找出最长的
         def get_duration(video):
             cmd = ['ffprobe', '-v', 'error', '-show_entries', 'format=duration', 
@@ -469,7 +473,7 @@ class VideoGridService:
             '-filter_complex', filter_complex,
             '-map', '[out]',
             '-r', str(self.fps),
-            '-c:v', 'libx264', '-preset', 'fast',
+            '-c:v', 'libx264', '-preset', 'medium', '-b:v', bitrate,
             '-pix_fmt', 'yuv420p',
             '-t', str(max_duration),
             '-y',
@@ -538,6 +542,11 @@ class VideoGridService:
             [bg][active]overlay={overlay_x}:{overlay_y}[out]
             """
             
+            # 获取码率设置
+            bitrate_setting = st.session_state.get('video_grid_bitrate', '中 (5Mbps)')
+            bitrate_map = {'低 (2Mbps)': '2M', '中 (5Mbps)': '5M', '高 (10Mbps)': '10M'}
+            bitrate = bitrate_map.get(bitrate_setting, '5M')
+            
             # 4个静态帧 + 1个活动视频（保留音频）
             cmd = [
                 'ffmpeg',
@@ -551,7 +560,7 @@ class VideoGridService:
                 '-map', '4:a?',  # 保留活动视频的音频
                 '-t', str(durations[active_video_idx]),
                 '-r', str(self.fps),
-                '-c:v', 'libx264', '-preset', 'fast',
+                '-c:v', 'libx264', '-preset', 'medium', '-b:v', bitrate,
                 '-pix_fmt', 'yuv420p',
                 '-c:a', 'aac',
                 '-y', seg_output
@@ -574,10 +583,15 @@ class VideoGridService:
         random_name = random_with_system_time()
         output_video = os.path.join(video_output_dir, f"grid-4grid-{random_name}.mp4")
         
+        # 获取码率设置
+        bitrate_setting = st.session_state.get('video_grid_bitrate', '中 (5Mbps)')
+        bitrate_map = {'低 (2Mbps)': '2M', '中 (5Mbps)': '5M', '高 (10Mbps)': '10M'}
+        bitrate = bitrate_map.get(bitrate_setting, '5M')
+        
         command = [
             'ffmpeg', '-f', 'concat', '-safe', '0',
             '-i', concat_list,
-            '-c:v', 'libx264', '-preset', 'fast',
+            '-c:v', 'libx264', '-preset', 'medium', '-b:v', bitrate,
             '-pix_fmt', 'yuv420p',
             '-c:a', 'aac',
             '-y', output_video

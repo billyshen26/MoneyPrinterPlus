@@ -153,6 +153,29 @@ with config_container:
             help="输出视频的帧率"
         )
 
+    col3, col4 = st.columns(2)
+    with col3:
+        resolution_options = {
+            "1080p": "1080p (1920x1080)", 
+            "720p": "720p (1280x720)",
+            "4k": "4K (3840x2160)"
+        }
+        st.selectbox(
+            label="输出分辨率",
+            key="video_grid_resolution",
+            options=resolution_options,
+            format_func=lambda x: resolution_options[x],
+            help="输出视频的分辨率，越高越清晰但文件越大"
+        )
+
+    with col4:
+        st.selectbox(
+            label="视频码率",
+            key="video_grid_bitrate",
+            options=["低 (2Mbps)", "中 (5Mbps)", "高 (10Mbps)"],
+            help="视频码率，越高越清晰但文件越大"
+        )
+
     st.markdown("---")
     st.toggle(
         label="视频依次播放（关闭则同时播放）",
