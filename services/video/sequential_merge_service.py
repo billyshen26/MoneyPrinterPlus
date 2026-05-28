@@ -71,7 +71,7 @@ def extract_username_from_filename(filename):
     return None
 
 
-def render_username_image(username, output_path, prefix="出境小姐姐：", width=400, font_size=28):
+def render_username_image(username, output_path, prefix="出镜小姐姐：", width=500, font_size=36):
     """用 Pillow 把用户名渲染成白字透明底图片，支持前缀"""
     try:
         full_text = f"{prefix}{username}" if prefix else username
@@ -128,6 +128,10 @@ class SequentialMergeService:
         self.filter_preset = st.session_state.get("sequential_filter_preset", "light")
         self.show_username_watermark = st.session_state.get("sequential_show_username_watermark", True)
 
+        # 封面文字
+        self.cover_line1 = st.session_state.get("sequential_cover_line1", "盘点漂亮小姐姐")
+        self.cover_line2 = st.session_state.get("sequential_cover_line2", "你最喜欢哪一位")
+
         self.originality_service = OriginalityService(work_output_dir)
 
     def process_videos(self):
@@ -179,7 +183,7 @@ class SequentialMergeService:
 
             if username:
                 username_img = generate_temp_filename(output_name, "_username.png", work_output_dir)
-                if render_username_image(username, username_img, prefix="出境小姐姐：", width=400, font_size=28):
+                if render_username_image(username, username_img, prefix="出镜小姐姐：", width=500, font_size=36):
                     # 根据水印位置计算 overlay 坐标
                     if self.watermark_position == "top_left":
                         overlay_pos = "10:10"
@@ -345,7 +349,9 @@ class SequentialMergeService:
                 self.target_width,
                 self.target_height,
                 self.fps,
-                self.cover_timestamp
+                self.cover_timestamp,
+                self.cover_line1,
+                self.cover_line2
             )
         elif self.cover_type == "9grid" and len(video_list) >= 9:
             cover_image, cover_video = generate_video_cover(
@@ -354,7 +360,9 @@ class SequentialMergeService:
                 self.target_width,
                 self.target_height,
                 self.fps,
-                self.cover_timestamp
+                self.cover_timestamp,
+                self.cover_line1,
+                self.cover_line2
             )
 
         if cover_video and os.path.exists(cover_video):

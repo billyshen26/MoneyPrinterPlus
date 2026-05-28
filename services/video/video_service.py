@@ -258,14 +258,14 @@ def extract_video_frame(video_file, timestamp, output_image):
     return os.path.exists(output_image)
 
 
-def create_4grid_cover(frame_files, output_image, thumb_width, thumb_height):
-    """创建4宫格封面图"""
+def create_4grid_cover(frame_files, output_image, thumb_width, thumb_height, line1=None, line2=None):
+    """创建4宫格封面图，带文字"""
     if len(frame_files) < 4:
         print(f"帧文件数量不足: {len(frame_files)}")
         return False
-    
+
     w, h = thumb_width, thumb_height
-    
+
     # 先缩放每个帧到统一尺寸并保存
     scaled_files = []
     for i, frame in enumerate(frame_files[:4]):
@@ -278,40 +278,130 @@ def create_4grid_cover(frame_files, output_image, thumb_width, thumb_height):
         subprocess.run(scale_cmd, capture_output=True)
         if os.path.exists(scaled):
             scaled_files.append(scaled)
-    
+
     if len(scaled_files) < 4:
         print(f"缩放失败，只成功 {len(scaled_files)} 个")
         return False
-    
+
     # 使用ffmpeg的vstack和hstack拼接
     # 先横向拼接每行
     top_row = os.path.join(os.path.dirname(output_image), 'top_row.jpg')
     bottom_row = os.path.join(os.path.dirname(output_image), 'bottom_row.jpg')
-    
+
     hstack1 = subprocess.run([
         'ffmpeg', '-i', scaled_files[0], '-i', scaled_files[1],
         '-filter_complex', 'hstack=inputs=2', '-y', top_row
     ], capture_output=True)
-    
+
     hstack2 = subprocess.run([
         'ffmpeg', '-i', scaled_files[2], '-i', scaled_files[3],
         '-filter_complex', 'hstack=inputs=2', '-y', bottom_row
     ], capture_output=True)
-    
+
     # 再纵向拼接
     vstack = subprocess.run([
         'ffmpeg', '-i', top_row, '-i', bottom_row,
         '-filter_complex', 'vstack=inputs=2', '-y', output_image
     ], capture_output=True)
-    
+
     # 清理临时文件
     for f in scaled_files + [top_row, bottom_row]:
         if os.path.exists(f):
             os.remove(f)
-    
+
+    if os.path.exists(output_image):
+        # 在封面上添加文字
+        add_text_to_cover(output_image, output_image, line1, line2)
+
     success = os.path.exists(output_image)
     print(f"4宫格封面创建{'成功' if success else '失败'}")
     return success
+
+
+def add_text_to_cover(input_image, output_image, line1=None, line2=None):
+    """在封面上添加粉色文字"""
+    try:
+        from PIL import Image, ImageDraw, ImageFont
+        import streamlit as st
+
+        img = Image.open(input_image)
+        draw = ImageDraw.Draw(img)
+
+        # 获取用户输入的文字（默认）
+        if line1 is None:
+            line1 = st.session_state.get("sequential_cover_line1", "盘点漂亮小姐姐")
+        if line2 is None:
+            line2 = st.session_state.get("sequential_cover_line2", "你最喜欢哪一位")
+
+        # 如果文字为空，不添加
+        if not line1 and not line2:
+            img.save(output_image)
+            return True
+
+        # 获取字体，增大到96
+        font_size = 96
+        font = None
+        for fp in ['C:/Windows/Fonts/msyh.ttc', 'C:/Windows/Fonts/simhei.ttf', 'C:/Windows/Fonts/simsun.ttc']:
+            if os.path.exists(fp):
+                font = ImageFont.truetype(fp, font_size)
+                break
+        if font is None:
+            font = ImageFont.load_default()
+
+        # 粉色颜色 (偏暖的粉红色)
+        pink_color = (255, 105, 180)  # HotPink
+        shadow_color = (139, 0, 70)   # 深粉红作为阴影
+
+        img_width, img_height = img.size
+
+        # 如果只有一行文字
+        if line1 and not line2:
+            bbox1 = draw.textbbox((0, 0), line1, font=font)
+            text1_width = bbox1[2] - bbox1[0]
+            text1_height = bbox1[3] - bbox1[1]
+            x1 = (img_width - text1_width) // 2
+            y1 = (img_height - text1_height) // 2
+            stroke_width = 4
+            draw.text((x1, y1), line1, font=font, fill=shadow_color, stroke_width=stroke_width, stroke_fill=shadow_color)
+            draw.text((x1, y1), line1, font=font, fill=pink_color)
+        elif line1 and line2:
+            # 两行文字
+            bbox1 = draw.textbbox((0, 0), line1, font=font)
+            bbox2 = draw.textbbox((0, 0), line2, font=font)
+
+            text1_width = bbox1[2] - bbox1[0]
+            text1_height = bbox1[3] - bbox1[1]
+            text2_width = bbox2[2] - bbox2[0]
+            text2_height = bbox2[3] - bbox2[1]
+
+            line_spacing = 15
+            total_text_height = text1_height + line_spacing + text2_height
+
+            # 第一行位置（垂直居中偏上）
+            y1 = (img_height - total_text_height) // 2 - 20
+            # 第二行位置
+            y2 = y1 + text1_height + line_spacing
+
+            # 第一行 x 居中
+            x1 = (img_width - text1_width) // 2
+            # 第二行 x 居中
+            x2 = (img_width - text2_width) // 2
+
+            stroke_width = 4
+            # 绘制阴影
+            draw.text((x1, y1), line1, font=font, fill=shadow_color, stroke_width=stroke_width, stroke_fill=shadow_color)
+            draw.text((x2, y2), line2, font=font, fill=shadow_color, stroke_width=stroke_width, stroke_fill=shadow_color)
+
+            # 绘制主文字
+            draw.text((x1, y1), line1, font=font, fill=pink_color)
+            draw.text((x2, y2), line2, font=font, fill=pink_color)
+
+        img.save(output_image)
+        print("封面文字添加成功")
+        return True
+    except Exception as e:
+        print(f"添加封面文字失败: {e}")
+        return False
 
 
 def create_cover_video(image_file, duration, fps, width, height, output_video):
@@ -335,10 +425,10 @@ def create_cover_video(image_file, duration, fps, width, height, output_video):
     return os.path.exists(output_video)
 
 
-def generate_video_cover(video_list, output_dir, video_width, video_height, fps, timestamp=2):
+def generate_video_cover(video_list, output_dir, video_width, video_height, fps, timestamp=2, line1=None, line2=None):
     """
     生成4宫格封面视频
-    
+
     Args:
         video_list: 视频文件列表（需要>=4个）
         output_dir: 输出目录
@@ -346,26 +436,28 @@ def generate_video_cover(video_list, output_dir, video_width, video_height, fps,
         video_height: 视频高度
         fps: 帧率
         timestamp: 截取帧的时间点（秒）
-    
+        line1: 封面第一行文字
+        line2: 封面第二行文字
+
     Returns:
         (cover_image_path, cover_video_path) or (None, None) if failed
     """
     import uuid
-    
+
     print(f"[DEBUG] generate_video_cover 被调用，视频列表: {video_list[:2]}...")  # 只打印前两个
-    
+
     if len(video_list) < 4:
         print(f"视频数量不足4个，无法生成4宫格封面。当前有 {len(video_list)} 个视频")
         return None, None
-    
+
     # 缩略图尺寸（视频尺寸的一半）
     thumb_width = video_width // 2
     thumb_height = video_height // 2
-    
+
     # 临时目录存放帧图片
     temp_dir = os.path.join(output_dir, 'cover_temp')
     os.makedirs(temp_dir, exist_ok=True)
-    
+
     # 截取每个视频的帧
     frame_files = []
     for i, video_file in enumerate(video_list[:4]):
@@ -374,16 +466,16 @@ def generate_video_cover(video_list, output_dir, video_width, video_height, fps,
         if extract_video_frame(video_file, timestamp, frame_path):
             frame_files.append(frame_path)
             print(f"[DEBUG] 帧截取成功: {frame_path}")
-    
+
     print(f"[DEBUG] 共截取 {len(frame_files)} 个帧")
-    
+
     if len(frame_files) < 4:
         print("截取帧失败")
         return None, None
-    
-    # 创建4宫格封面图
+
+    # 创建4宫格封面图（带文字）
     cover_image = os.path.join(output_dir, 'cover.jpg')
-    if create_4grid_cover(frame_files, cover_image, thumb_width, thumb_height):
+    if create_4grid_cover(frame_files, cover_image, thumb_width, thumb_height, line1, line2):
         print(f"4宫格封面已保存: {cover_image}")
     else:
         print("创建4宫格封面失败")
@@ -394,9 +486,9 @@ def generate_video_cover(video_list, output_dir, video_width, video_height, fps,
         if os.path.exists(f):
             os.remove(f)
     
-    # 创建封面视频（1秒）
+    # 创建封面视频（2秒）
     cover_video = os.path.join(output_dir, 'cover_video.mp4')
-    if create_cover_video(cover_image, 1, fps, video_width, video_height, cover_video):
+    if create_cover_video(cover_image, 2, fps, video_width, video_height, cover_video):
         print(f"封面视频已创建: {cover_video}")
     else:
         print("创建封面视频失败")

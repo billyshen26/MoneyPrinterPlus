@@ -21,6 +21,7 @@
 #
 #
 
+import json
 import os
 
 import streamlit as st
@@ -33,12 +34,50 @@ from tools.tr_utils import tr
 load_session_state_from_yaml('08_first_visit')
 
 
-def generate_sequential_merge(video_generator):
-    save_session_state_to_yaml()
-    main_generate_sequential_merge(video_generator)
+def get_used_videos_file(video_folder):
+    """获取视频文件夹对应的已使用记录文件路径"""
+    return os.path.join(video_folder, ".used_videos.json")
 
 
-def main_generate_sequential_merge(video_generator):
+def load_used_videos_from_file(video_folder):
+    """从 JSON 文件加载已使用视频列表"""
+    file_path = get_used_videos_file(video_folder)
+    if os.path.exists(file_path):
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                return data.get("used_videos", [])
+        except Exception as e:
+            print(f"加载已使用视频记录失败: {e}")
+    return []
+
+
+def save_used_videos_to_file(video_folder, used_videos):
+    """保存已使用视频列表到 JSON 文件"""
+    file_path = get_used_videos_file(video_folder)
+    try:
+        import datetime
+        with open(file_path, 'w', encoding='utf-8') as f:
+            json.dump({"used_videos": used_videos, "last_updated": datetime.datetime.now().isoformat()}, f)
+    except Exception as e:
+        print(f"保存已使用视频记录失败: {e}")
+
+
+def reset_used_videos_in_file(video_folder):
+    """重置视频文件夹中的已使用记录"""
+    file_path = get_used_videos_file(video_folder)
+    if os.path.exists(file_path):
+        try:
+            os.remove(file_path)
+        except Exception as e:
+            print(f"删除已使用视频记录失败: {e}")
+
+
+def generate_sequential_merge():
+    main_generate_sequential_merge()
+
+
+def main_generate_sequential_merge():
     video_folder = st.session_state.get("sequential_video_folder", "")
     video_count = st.session_state.get("sequential_video_count", 4)
 
@@ -47,23 +86,24 @@ def main_generate_sequential_merge(video_generator):
         return
 
     video_files = get_video_files_from_folder(video_folder)
-    
-    # 如果开启不重复使用视频，排除已使用的视频
+
+    # 如果开启不重复使用视频，从文件加载并排除已使用的视频
     no_repeat = st.session_state.get("sequential_no_repeat", True)
     if no_repeat:
-        used_videos = st.session_state.get("sequential_used_videos", [])
+        used_videos = load_used_videos_from_file(video_folder)
         video_files = [v for v in video_files if v not in used_videos]
-    
+
     if len(video_files) < video_count:
         st.error(tr("Not enough videos in folder. Need") + f" {video_count}, found {len(video_files)}")
         return
 
     selected_videos = video_files[:video_count]
-    
-    # 记录本次使用的视频
+
+    # 记录本次使用的视频到文件和 session_state
     if no_repeat:
-        used_videos = st.session_state.get("sequential_used_videos", [])
+        used_videos = load_used_videos_from_file(video_folder)
         used_videos.extend(selected_videos)
+        save_used_videos_to_file(video_folder, used_videos)
         st.session_state["sequential_used_videos"] = used_videos
 
     with st.status(tr("Processing videos..."), expanded=True) as status:
@@ -91,9 +131,10 @@ def main_generate_sequential_merge(video_generator):
         if result and os.path.exists(result):
             st.session_state["sequential_result_video"] = result
             status.update(label=tr("Video generated successfully!"), state="complete", expanded=False)
-            st.rerun()
+            st.toast("视频生成成功！", icon="✅")
         else:
             status.update(label=tr("Video generation failed"), state="error")
+            st.error("视频生成失败，请查看日志")
 
 
 common_ui()
@@ -141,16 +182,40 @@ with folder_container:
     with llm_columns[2]:
         st.write("")  # 占位
         if st.button("刷新文件列表", use_container_width=True):
-            st.rerun()
-    
-    # 显示已使用视频数量
-    if st.session_state.get("sequential_no_repeat", True):
-        used_count = len(st.session_state.get("sequential_used_videos", []))
+            st.session_state["refresh_trigger"] = not st.session_state.get("refresh_trigger", False)
+
+    # 显示已使用视频数量（从文件加载）
+    if st.session_state.get("sequential_no_repeat", True) and video_folder:
+        used_videos = load_used_videos_from_file(video_folder)
+        used_count = len(used_videos)
+        available_count = max(0, len(all_videos) - used_count)
+
         if used_count > 0:
-            st.info(f"已使用 {used_count} 个视频，当前可用 {max(0, len(all_videos) - used_count)} 个")
-            if st.button("重置已使用记录"):
-                st.session_state["sequential_used_videos"] = []
-                st.rerun()
+            st.info(f"已使用 {used_count} 个视频，当前可用 {available_count} 个")
+            st.session_state["sequential_used_videos"] = used_videos
+
+            # 确认重置对话框
+            if "show_reset_confirm" not in st.session_state:
+                st.session_state["show_reset_confirm"] = False
+
+            col1, col2 = st.columns([1, 4])
+            with col1:
+                if st.button("重置已使用记录"):
+                    st.session_state["show_reset_confirm"] = True
+
+            if st.session_state["show_reset_confirm"]:
+                st.warning("确定要重置已使用记录吗？这将允许已使用过的视频再次被使用。")
+                confirm_col1, confirm_col2 = st.columns(2)
+                with confirm_col1:
+                    if st.button("确认重置", type="primary"):
+                        reset_used_videos_in_file(video_folder)
+                        st.session_state["sequential_used_videos"] = []
+                        st.session_state["show_reset_confirm"] = False
+                        st.rerun()
+                with confirm_col2:
+                    if st.button("取消"):
+                        st.session_state["show_reset_confirm"] = False
+                        st.rerun()
 
 # 视频配置
 video_container = st.container(border=True)
@@ -231,10 +296,10 @@ with transition_container:
         )
     with llm_columns[2]:
         st.checkbox(
-            label="显示出境小姐姐水印",
+            label="显示出镜小姐姐水印",
             key="sequential_show_username_watermark",
             value=True,
-            help="启用后将在视频左上角显示 '出境小姐姐：用户名' 水印"
+            help="启用后将在视频左上角显示 '出镜小姐姐：用户名' 水印"
         )
     with llm_columns[3]:
         watermark_position_options = {
@@ -302,6 +367,23 @@ with cover_container:
         if generated_cover and os.path.exists(generated_cover):
             st.image(generated_cover, caption="生成的封面", width=150)
 
+    # 封面文字设置
+    text_columns = st.columns(2)
+    with text_columns[0]:
+        st.text_input(
+            label="封面第一行文字",
+            key="sequential_cover_line1",
+            value="盘点漂亮小姐姐",
+            help="封面上的第一行文字"
+        )
+    with text_columns[1]:
+        st.text_input(
+            label="封面第二行文字",
+            key="sequential_cover_line2",
+            value="你最喜欢哪一位",
+            help="封面上的第二行文字"
+        )
+
 # 背景音乐配置
 bgm_container = st.container(border=True)
 with bgm_container:
@@ -334,14 +416,20 @@ with bgm_container:
         )
 
 # 生成视频
+if "is_generating" not in st.session_state:
+    st.session_state["is_generating"] = False
+
 video_generator = st.container(border=True)
 with video_generator:
-    st.button(
-        label="生成视频",
+    if st.button(
+        "生成视频" if not st.session_state["is_generating"] else "生成中...",
         type="primary",
-        on_click=generate_sequential_merge,
-        args=(video_generator,)
-    )
+        key="generate_btn",
+        disabled=st.session_state["is_generating"]
+    ):
+        st.session_state["is_generating"] = True
+        main_generate_sequential_merge()
+        st.session_state["is_generating"] = False
 
 # 显示结果
 result_video = st.session_state.get("sequential_result_video")
@@ -357,3 +445,8 @@ if result_video and os.path.exists(result_video):
             file_name=os.path.basename(result_video),
             mime="video/mp4"
         )
+
+    # 清除结果按钮
+    if st.button("清除结果", type="secondary"):
+        st.session_state.pop("sequential_result_video", None)
+        st.rerun()
