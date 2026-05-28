@@ -1,0 +1,42 @@
+---
+description: MoneyPrinterPlus page and menu conventions
+alwaysApply: true
+---
+
+# MoneyPrinterPlus 项目规范
+
+## 新增页面/菜单
+
+创建新页面时，必须同时更新以下文件：
+
+### 1. 添加侧边栏菜单 (`pages/common.py`)
+
+在 `st.sidebar.page_link()` 列表中添加新页面：
+
+```python
+st.sidebar.page_link("pages/XX_name.py", label=tr("Menu Display Name"))
+```
+
+### 2. 添加翻译 (`locales/zh-CN.json`)
+
+添加中文字段：
+
+```json
+"Menu Display Name": "菜单显示名称"
+```
+
+### 3. 服务模块
+
+新增服务时，在 `services/{category}/__init__.py` 中导出：
+
+```python
+from services.{category}.{service_name} import {ServiceClass}
+__all__ = ['{ServiceClass}']
+```
+
+## 代码风格
+
+- 文件头包含版权声明
+- 使用 `st.session_state` 管理状态
+- 长时间操作使用 `st.spinner` 或 `st.status`
+- 错误处理使用 `try-except` 并显示友好提示

@@ -29,16 +29,6 @@ from config.config import transition_types, fade_list, load_session_state_from_y
     save_session_state_to_yaml, app_title
 from main import main_generate_simple_merge
 from pages.common import common_ui
-from tools.utils import get_file_map_from_dir
-
-# 获取当前脚本的绝对路径
-script_path = os.path.abspath(__file__)
-
-# 脚本所在的目录
-script_dir = os.path.dirname(script_path)
-
-default_bg_music_dir = os.path.join(script_dir, "../bgmusic")
-default_bg_music_dir = os.path.abspath(default_bg_music_dir)
 
 load_session_state_from_yaml('04_first_visit')
 
@@ -58,46 +48,52 @@ st.markdown("<h2 style='text-align: center;padding-top: 0rem;'>多视频合并�
 folder_container = st.container(border=True)
 with folder_container:
     st.subheader("视频来源")
-    st.text_input(
+
+    video_folder = st.text_input(
         label="视频文件夹路径",
         placeholder="请输入视频文件夹路径",
         key="simple_merge_video_folder"
     )
 
-# 背景音乐
-bg_music_container = st.container(border=True)
-with bg_music_container:
-    st.subheader("背景音乐")
-    llm_columns = st.columns(2)
+    # 随机选择设置
+    llm_columns = st.columns(3)
     with llm_columns[0]:
-        st.text_input(
-            label="背景音乐目录",
-            placeholder="输入背景音乐目录",
-            value=default_bg_music_dir,
-            key="background_music_dir"
+        st.number_input(
+            label="随机选择视频数量",
+            min_value=2,
+            max_value=20,
+            value=4,
+            step=1,
+            key="random_video_count",
+            help="每次随机选择的视频数量"
         )
-
     with llm_columns[1]:
-        nest_columns = st.columns(3)
-        with nest_columns[0]:
-            st.checkbox(label="启用背景音乐", key="enable_background_music", value=True)
-        with nest_columns[1]:
-            bg_music_list = get_file_map_from_dir(st.session_state.get("background_music_dir", default_bg_music_dir), ".mp3,.wav")
-            st.selectbox(
-                label="背景音乐",
-                key="background_music",
-                options=bg_music_list,
-                format_func=lambda x: bg_music_list.get(x, x)
-            )
-        with nest_columns[2]:
-            st.slider(label="背景音乐音量", min_value=0.0, value=0.3, max_value=1.0, step=0.1,
-                      key="background_music_volume")
+        st.checkbox(
+            label="使用已使用视频",
+            key="allow_reuse_videos",
+            value=False,
+            help="开启后将允许重复使用已拼接过的视频"
+        )
+    with llm_columns[2]:
+        used_count = len(st.session_state.get("used_video_files", []))
+        st.metric("已使用视频数", used_count)
+
+    # 显示已使用视频列表
+    if st.session_state.get("used_video_files"):
+        with st.expander("已使用的视频列表", expanded=False):
+            for i, vid in enumerate(st.session_state["used_video_files"], 1):
+                st.text(f"{i}. {os.path.basename(vid)}")
+
+    # 清除已使用记录按钮
+    if st.button("清除已使用记录"):
+        st.session_state["used_video_files"] = []
+        st.rerun()
 
 # 视频配置
 video_container = st.container(border=True)
 with video_container:
     st.subheader("视频配置")
-    llm_columns = st.columns(3)
+    llm_columns = st.columns(4)
     with llm_columns[0]:
         layout_options = {"portrait": "竖屏", "landscape": "横屏", "square": "方形"}
         st.selectbox(
@@ -124,6 +120,9 @@ with video_container:
             options=video_size_options,
             format_func=lambda x: video_size_options[x]
         )
+    with llm_columns[3]:
+        st.checkbox(label="显示用户名水印", key="show_video_username", value=True,
+                   help="从文件名提取用户名并显示在视频顶部（格式: fav_用户名_ID.mp4）")
 
     llm_columns = st.columns(4)
     with llm_columns[0]:
@@ -135,66 +134,6 @@ with video_container:
     with llm_columns[3]:
         st.selectbox(label="转场时长", key="video_transition_effect_duration",
                      options=["1", "2"])
-
-# 字幕
-subtitle_container = st.container(border=True)
-with subtitle_container:
-    st.subheader("字幕设置")
-    llm_columns = st.columns(4)
-    with llm_columns[0]:
-        st.checkbox(label="启用字幕", key="enable_subtitles", value=True)
-    with llm_columns[1]:
-        st.selectbox(
-            label="字幕字体",
-            key="subtitle_font",
-            options=[
-                "Songti SC Bold",
-                "Songti SC Black",
-                "Songti SC Light",
-                "STSong",
-                "Songti SC Regular",
-                "PingFang SC Regular",
-                "PingFang SC Medium",
-                "PingFang SC Semibold",
-                "PingFang SC Light",
-                "PingFang SC Thin",
-                "PingFang SC Ultralight"
-            ]
-        )
-    with llm_columns[2]:
-        st.selectbox(label="字幕大小", key="subtitle_font_size", index=1,
-                     options=[4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24])
-    with llm_columns[3]:
-        st.selectbox(label="字幕行数", key="captioning_lines", index=1,
-                     options=[1, 2])
-
-    llm_columns = st.columns(4)
-    with llm_columns[0]:
-        subtitle_position_options = {
-            5: "顶部左侧",
-            6: "顶部居中",
-            7: "顶部右侧",
-            9: "中间左侧",
-            10: "居中",
-            11: "中间右侧",
-            1: "底部左侧",
-            2: "底部居中",
-            3: "底部右侧"
-        }
-        st.selectbox(
-            label="字幕位置",
-            key="subtitle_position",
-            index=7,
-            options=subtitle_position_options,
-            format_func=lambda x: subtitle_position_options[x]
-        )
-    with llm_columns[1]:
-        st.color_picker(label="字幕颜色", key="subtitle_color", value="#FFFFFF")
-    with llm_columns[2]:
-        st.color_picker(label="字幕描边颜色", key="subtitle_border_color", value="#000000")
-    with llm_columns[3]:
-        st.slider(label="字幕描边宽度", min_value=0.0, value=0.0, max_value=4.0, step=1.0,
-                  key="subtitle_border_width")
 
 # 原创性提升配置
 originality_container = st.container(border=True)
@@ -274,42 +213,25 @@ with originality_container:
     # 第五行：水印
     llm_columns = st.columns(4)
     with llm_columns[0]:
+        st.checkbox(label="启用图片水印", key="enable_watermark", value=False,
+                   help="开启后在视频右下角添加水印图片")
+    with llm_columns[1]:
         st.text_input(
             label="水印图片路径",
             key="video_watermark_path",
             placeholder="输入水印图片路径",
             help="支持 PNG/JPG"
         )
-    with llm_columns[1]:
+    with llm_columns[2]:
         watermark_pos_options = {
             "top_left": "左上角", "top_right": "右上角",
             "bottom_left": "左下角", "bottom_right": "右下角", "center": "居中"
         }
         st.selectbox(label="水印位置", key="video_watermark_position",
                     options=watermark_pos_options, format_func=lambda x: watermark_pos_options[x])
-    with llm_columns[2]:
-        st.slider(label="水印透明度", min_value=0.1, max_value=1.0,
-                  value=0.7, step=0.1, key="video_watermark_opacity")
     with llm_columns[3]:
         st.slider(label="水印大小比例", min_value=0.05, max_value=0.30,
                   value=0.15, step=0.05, key="video_watermark_scale")
-
-    # 第六行：新BGM目录
-    llm_columns = st.columns(2)
-    with llm_columns[0]:
-        st.text_input(
-            label="新BGM目录（抖音热门音乐）",
-            key="new_bgm_dir",
-            placeholder="输入BGM文件夹路径，留空使用背景音乐目录",
-            help="如果设置，将随机从该目录选择音乐替换原视频音乐"
-        )
-    with llm_columns[1]:
-        st.markdown("""
-        **抖音热门BGM下载提示：**
-        请自行下载抖音热门背景音乐放入上述目录，推荐从以下渠道获取：
-        - 抖音创作者服务平台
-        - 音乐版权平台（如音加加）
-        """)
 
 # 自动封面配置
 cover_container = st.container(border=True)

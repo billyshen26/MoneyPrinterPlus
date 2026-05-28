@@ -315,15 +315,19 @@ def create_4grid_cover(frame_files, output_image, thumb_width, thumb_height):
 
 
 def create_cover_video(image_file, duration, fps, width, height, output_video):
-    """将图片转换为视频"""
+    """将图片转换为视频（带静音音频流）"""
+    # 使用 anullsrc 创建静音音频流，确保拼接时音频流不会被丢弃
     command = [
-        'ffmpeg', '-loop', '1',
-        '-i', image_file,
+        'ffmpeg',
+        '-loop', '1', '-i', image_file,
+        '-f', 'lavfi', '-i', f'anullsrc=r=44100:cl=stereo',
         '-t', str(duration),
         '-r', str(fps),
         '-vf', f'scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height}',
         '-c:v', 'libx264', '-preset', 'fast',
         '-pix_fmt', 'yuv420p',
+        '-c:a', 'aac', '-ar', '44100', '-ac', '2',
+        '-shortest',
         '-y', output_video
     ]
     print(f"封面图转视频: {image_file} -> {output_video}")

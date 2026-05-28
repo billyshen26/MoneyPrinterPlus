@@ -123,6 +123,8 @@
   "Driver Type": "驱动类型",
   "Driver Location": "驱动位置",
   "Driver Debugger Address": "驱动调试地址",
+  "Auto Start Chrome": "自动启动Chrome",
+  "Automatically start Chrome in debug mode if not running": "如果Chrome未在调试模式下运行，自动启动Chrome",
   "Video Content Dir": "视频内容所在目录",
   "Start Publish": "发布视频",
   "Download the driver from https://googlechromelabs.github.io/chrome-for-testing/": "从 https://googlechromelabs.github.io/chrome-for-testing/ 下载驱动",
@@ -156,5 +158,22 @@
   "Video File": "视频文件",
   "Text File": "文本文件",
 
-  "Video Grid": "视频组合"
+  "Video Grid": "视频组合",
+
+  "AI Subtitle Generator": "AI字幕生成器",
+  "Movie Subtitle Cut": "电影字幕剪切",
+  "Sequential Merge Video": "顺序拼接视频",
+  "Video Folder Path": "视频文件夹路径",
+  "Video Count": "选择视频数量",
+  "Load Videos": "加载视频",
+  "Transition Type": "转场类型",
+  "Transition Duration": "转场时长",
+  "Watermark Text": "水印文字",
+  "Watermark Position": "水印位置",
+  "Cover Type": "封面类型",
+  "Cover Timestamp": "封面截取时间",
+  "Processing videos...": "正在处理视频...",
+  "Video generated successfully!": "视频生成成功！",
+  "Video generation failed": "视频生成失败",
+  "Not enough videos in folder. Need": "文件夹中视频数量不足，需要"
 }

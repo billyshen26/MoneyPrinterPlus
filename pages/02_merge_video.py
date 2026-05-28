@@ -138,8 +138,21 @@ with bg_music_container:
             st.checkbox(label=tr("Enable background music"), key="enable_background_music", value=True)
         with nest_columns[1]:
             bg_music_list = get_file_map_from_dir(st.session_state["background_music_dir"], ".mp3,.wav")
+            # 确保 options 不为空，并且包含空字符串选项
+            if not bg_music_list:
+                bg_music_list = {"": "无背景音乐"}
+            # 确保空字符串选项存在
+            if "" not in bg_music_list:
+                bg_music_list = {"": "无背景音乐", **bg_music_list}
+            options_list = list(bg_music_list.keys())
+            current_bg_music = st.session_state.get("background_music", "")
+            # 确保当前值在 options 中
+            if current_bg_music not in options_list:
+                current_bg_music = options_list[0] if options_list else ""
+            selected_index = options_list.index(current_bg_music) if current_bg_music in options_list else 0
             st.selectbox(label=tr("Background music"), key="background_music",
-                         options=bg_music_list, format_func=lambda x: bg_music_list[x])
+                         options=options_list, index=selected_index,
+                         format_func=lambda x: bg_music_list.get(x, x))
         with nest_columns[2]:
             st.slider(label=tr("Background music volume"), min_value=0.0, value=0.3, max_value=1.0, step=0.1,
                       key="background_music_volume")

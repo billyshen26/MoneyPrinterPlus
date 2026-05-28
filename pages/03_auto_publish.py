@@ -281,6 +281,9 @@ with video_container:
                       args=('video_publish_driver_location',),
                       help=tr("Download the driver from https://googlechromelabs.github.io/chrome-for-testing/"))
         st.text_input(label=tr("Driver Debugger Address"), value="127.0.0.1:9222", key="video_publish_debugger_address")
+        st.checkbox(label=tr("Auto Start Chrome"), key="video_publish_auto_start_chrome",
+                    value=True,
+                    help=tr("Automatically start Chrome in debug mode if not running"))
     if st.session_state.get("video_publish_driver_type") == 'firefox':
         st.text_input(label=tr("Driver Location"), key="video_publish_driver_location",
                       value=get_driver_location(), on_change=set_driver_location,

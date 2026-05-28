@@ -46,7 +46,7 @@ from services.llm.tongyi_service import MyTongyiService
 from services.resource.pexels_service import PexelsService
 from services.resource.pixabay_service import PixabayService
 from services.sd.sd_service import SDService
-from services.video.merge_service import merge_get_video_list, VideoMergeService, merge_generate_subtitle, get_all_videos_from_folder
+from services.video.merge_service import merge_get_video_list, VideoMergeService, merge_generate_subtitle, get_all_videos_from_folder, get_random_videos_from_folder
 from services.video.video_service import get_audio_duration, VideoService, VideoMixService
 from tools.tr_utils import tr
 from tools.utils import random_with_system_time, get_must_session_option, extent_audio
@@ -444,10 +444,28 @@ def main_generate_simple_merge(video_generator):
         st.error(tr("Please input video folder path"))
         return
 
-    video_list = get_all_videos_from_folder(video_folder)
+    # 获取随机选择配置
+    random_count = st.session_state.get("random_video_count", 4)
+    allow_reuse = st.session_state.get("allow_reuse_videos", False)
+    used_videos = st.session_state.get("used_video_files", [])
+
+    # 随机选择视频
+    video_list = get_random_videos_from_folder(
+        video_folder,
+        count=random_count,
+        used_videos=used_videos,
+        allow_reuse=allow_reuse
+    )
+
     if not video_list:
-        st.error(tr("No video files found in the folder"))
+        st.error(tr("No available video files found"))
         return
+
+    # 更新已使用视频列表
+    if not allow_reuse:
+        new_used = used_videos.copy()
+        new_used.extend(video_list)
+        st.session_state["used_video_files"] = new_used
 
     with video_generator:
         st_area = st.status(tr("Generate Video in process..."), expanded=True)

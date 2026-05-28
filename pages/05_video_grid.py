@@ -232,11 +232,13 @@ with preview_container:
         layout = st.session_state.get("video_grid_layout", "4grid")
         required = 4 if layout == "4grid" else 9
 
-        cols = st.columns(min(len(folder_video_files[:required]), 4))
-        for idx, video_file in enumerate(folder_video_files[:required]):
-            with cols[idx % 4]:
-                st.video(video_file)
-                st.caption(f"视频 {idx + 1}: {os.path.basename(video_file)}")
+        video_count = min(len(folder_video_files), required)
+        if video_count > 0:
+            cols = st.columns(video_count)
+            for idx, video_file in enumerate(folder_video_files[:required]):
+                with cols[idx % video_count]:
+                    st.video(video_file)
+                    st.caption(f"视频 {idx + 1}: {os.path.basename(video_file)}")
     else:
         st.info("请先输入视频文件夹路径")
 

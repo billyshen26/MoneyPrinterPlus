@@ -314,27 +314,14 @@ class OriginalityService:
     def process_video(self, video_file,
                       # 随机起点
                       enable_random_start=True, max_offset=2.0, max_duration=5.0,
-                      # 变速
-                      enable_speed_change=False, speed_range=(0.92, 1.08),
-                      # 镜像
-                      enable_mirror=False, mirror_direction="horizontal",
-                      # 缩放
-                      enable_random_crop=False, crop_scale_range=(0.95, 1.05),
                       # 噪点
                       enable_noise=False, noise_intensity=15,
-                      # 速度渐变
-                      enable_speed_ramp=False, speed_ramp_type="ease_in_out",
                       # 滤镜
-                      filter_preset="none",
-                      # 水印
-                      watermark_path=None, watermark_position="bottom_right",
-                      watermark_opacity=0.7, watermark_scale=0.15,
-                      # 音频
-                      remove_original_audio=False):
+                      filter_preset="none"):
         """
         一站式处理视频：按顺序应用所有原创性提升处理
 
-        处理顺序：随机起点 -> 变速 -> 镜像 -> 噪点 -> 滤镜 -> 缩放 -> 水印
+        处理顺序：随机起点 -> 噪点 -> 滤镜
         """
         current_file = video_file
 
@@ -342,38 +329,13 @@ class OriginalityService:
         if enable_random_start:
             current_file = self.apply_random_start_point(current_file, max_offset, max_duration)
 
-        # 2. 速度渐变 (与变速互斥，优先级更高)
-        if enable_speed_ramp:
-            current_file = self.apply_speed_ramp(current_file, speed_ramp_type)
-        # 3. 变速处理
-        elif enable_speed_change:
-            speed_factor = random.uniform(speed_range[0], speed_range[1])
-            current_file = self.apply_speed_change(current_file, speed_factor)
-
-        # 4. 镜像翻转
-        if enable_mirror:
-            current_file = self.apply_mirror(current_file, mirror_direction)
-
-        # 5. 添加噪点
+        # 2. 添加噪点
         if enable_noise:
             current_file = self.apply_noise(current_file, noise_intensity)
 
-        # 6. 色彩滤镜
+        # 3. 色彩滤镜
         if filter_preset and filter_preset != "none":
             current_file = self.apply_filter(current_file, filter_preset)
-
-        # 7. 随机缩放
-        if enable_random_crop:
-            current_file = self.apply_random_crop(current_file, crop_scale_range)
-
-        # 8. 水印添加
-        if watermark_path:
-            current_file = self.add_watermark(current_file, watermark_path,
-                                             watermark_position, watermark_opacity, watermark_scale)
-
-        # 9. 移除原音（最后处理，因为后续不需要音频）
-        if remove_original_audio:
-            current_file = self.remove_audio(current_file)
 
         return current_file
 

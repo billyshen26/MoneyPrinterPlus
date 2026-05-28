@@ -52,6 +52,8 @@ def common_ui():
     st.sidebar.page_link("pages/04_simple_merge.py", label=tr("Simple Merge Video"))
     st.sidebar.page_link("pages/05_video_grid.py", label=tr("Video Grid"))
     st.sidebar.page_link("pages/06_video_subtitle_cut.py", label=tr("Movie Subtitle Cut"))
+    st.sidebar.page_link("pages/07_subtitle_generator.py", label=tr("AI Subtitle Generator"))
+    st.sidebar.page_link("pages/08_sequential_merge.py", label=tr("Sequential Merge Video"))
     st.sidebar.page_link("pages/03_auto_publish.py", label=tr("Video Auto Publish"))
     # st.sidebar.markdown(
     #     '<a style="text-align: center;padding-top: 0rem;" href="http://www.flydean.com">Developed by 程序那些事</a>',

@@ -21,4 +21,6 @@ sensevoice/*
 .DS_Store
 chromedriver/*
 chromedriver-mac-arm64/
+chrome_debug_data/
+services/publisher/chrome_debug_data/
 !README.md

@@ -140,12 +140,19 @@ def must_have_value(option: str, msg: str) -> Optional[str]:
 
 def run_ffmpeg_command(command):
     try:
-        result = subprocess.run(command, capture_output=True, check=True)
+        result = subprocess.run(command, capture_output=True, check=True, encoding='utf-8', errors='replace')
         print("Command executed successfully.")
         return True
+    except subprocess.CalledProcessError as e:
+        error_msg = e.stderr if e.stderr else str(e)
+        print(f"[ERROR] FFmpeg command failed:")
+        print(f"[ERROR] Command: {' '.join(command)}")
+        print(f"[ERROR] Error output: {error_msg}")
+        raise
     except Exception as e:
-        print(f"An error occurred while execute ffmpeg command {e}")
-        return False
+        print(f"[ERROR] An error occurred while execute ffmpeg command: {e}")
+        print(f"[ERROR] Command: {' '.join(command)}")
+        raise
 
 
 def extent_audio(audio_file, pad_dur=2):

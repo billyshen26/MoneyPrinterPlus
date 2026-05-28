@@ -21,6 +21,6 @@
 #
 #
 
-from services.video.sequential_merge_service import SequentialMergeService, get_video_files_from_folder
+from services.subtitle.subtitle_generator_service import SubtitleGeneratorService
 
-__all__ = ['SequentialMergeService', 'get_video_files_from_folder']
+__all__ = ['SubtitleGeneratorService']

@@ -24,10 +24,12 @@
 import itertools
 import os
 import random
+import re
 import subprocess
 from datetime import timedelta
 
 import streamlit as st
+from PIL import Image, ImageDraw, ImageFont
 
 from services.captioning.captioning_service import add_subtitles
 from services.hunjian.hunjian_service import get_session_video_scene_text, get_video_scene_text_list
@@ -51,6 +53,40 @@ video_output_dir = os.path.abspath(video_output_dir)
 # work目录
 work_output_dir = os.path.join(script_dir, "../../work")
 work_output_dir = os.path.abspath(work_output_dir)
+
+
+def extract_username_from_filename(filename):
+    """从文件名中提取用户名，格式: fav_用户名_ID.mp4"""
+    basename = os.path.basename(filename)
+    m = re.match(r'fav_(.+?)_\d+\.mp4$', basename)
+    if m:
+        return m.group(1)
+    return None
+
+
+def render_username_image(username, output_path, width=300, font_size=28):
+    """用 Pillow 把用户名渲染成白字透明底图片"""
+    try:
+        img = Image.new('RGBA', (width, font_size + 20), color=(0, 0, 0, 0))
+        draw = ImageDraw.Draw(img)
+        font = None
+        for fp in ['C:/Windows/Fonts/msyh.ttc', 'C:/Windows/Fonts/simhei.ttf', 'C:/Windows/Fonts/simsun.ttc']:
+            if os.path.exists(fp):
+                font = ImageFont.truetype(fp, font_size)
+                break
+        if font is None:
+            font = ImageFont.load_default()
+        bbox = draw.textbbox((0, 0), username, font=font)
+        text_w = bbox[2] - bbox[0]
+        text_h = bbox[3] - bbox[1]
+        x = (width - text_w) // 2
+        y = 4
+        draw.text((x, y), username, fill=(255, 255, 255), font=font, stroke_width=2, stroke_fill=(0, 0, 0))
+        img.save(output_path)
+        return True
+    except Exception as e:
+        print(f"渲染用户名图片失败: {e}")
+        return False
 
 
 def merge_generate_subtitle(video_scene_video_list, video_scene_text_list):
@@ -164,6 +200,44 @@ def get_all_videos_from_folder(video_folder):
     return video_files
 
 
+def get_random_videos_from_folder(video_folder, count, used_videos=None, allow_reuse=False):
+    """从文件夹中随机选择指定数量的视频
+
+    Args:
+        video_folder: 视频文件夹路径
+        count: 需要选择的视频数量
+        used_videos: 已使用的视频列表（绝对路径）
+        allow_reuse: 是否允许重复使用视频
+
+    Returns:
+        随机选择的视频列表
+    """
+    all_videos = get_all_videos_from_folder(video_folder)
+    if not all_videos:
+        return []
+
+    if used_videos is None:
+        used_videos = []
+
+    if allow_reuse:
+        # 允许重复时，直接随机选择
+        import random
+        return random.sample(all_videos, min(count, len(all_videos)))
+
+    # 不允许重复时，排除已使用的视频
+    available_videos = [v for v in all_videos if v not in used_videos]
+
+    # 如果可用视频不够，返回所有可用视频（可能少于要求的数量）
+    if len(available_videos) < count:
+        # 如果可用视频数量不足，随机返回可用的
+        import random
+        return random.sample(available_videos, len(available_videos)) if available_videos else []
+
+    # 随机选择
+    import random
+    return random.sample(available_videos, count)
+
+
 class VideoMergeService:
     def __init__(self, video_list):
         self.video_list = video_list
@@ -215,6 +289,7 @@ class VideoMergeService:
         self.filter_preset = st.session_state.get("video_filter_preset", "none")
         
         # 水印
+        self.enable_watermark = st.session_state.get("enable_watermark", False)
         self.watermark_path = st.session_state.get("video_watermark_path", "")
         self.watermark_position = st.session_state.get("video_watermark_position", "bottom_right")
         self.watermark_opacity = st.session_state.get("video_watermark_opacity", 0.7)
@@ -228,10 +303,20 @@ class VideoMergeService:
         self.enable_auto_cover = st.session_state.get("enable_auto_cover", False)
         self.cover_timestamp = st.session_state.get("cover_timestamp", 2.0)
         
+        # 用户名显示配置
+        self.show_username = st.session_state.get("show_video_username", True)
+        
         # 创建原创性服务
         self.originality_service = OriginalityService(work_output_dir)
 
     def normalize_video(self):
+        print(f"[DEBUG] ========== 开始normalize_video ==========")
+        print(f"[DEBUG] 输入视频列表共 {len(self.video_list)} 个:")
+        for i, v in enumerate(self.video_list):
+            if v:
+                exists = os.path.exists(v)
+                print(f"[DEBUG]   [{i+1}] {v} (存在: {exists})")
+        
         return_video_list = []
         
         # 保存原始视频列表用于生成封面
@@ -241,10 +326,10 @@ class VideoMergeService:
         # 生成4宫格封面
         cover_video = None
         if self.enable_auto_cover:
-            print(f"自动封面已启用，视频数量: {len(original_video_list)}")
+            print(f"[DEBUG] 自动封面已启用，视频数量: {len(original_video_list)}")
         if self.enable_auto_cover and len(original_video_list) >= 4:
             from services.video.video_service import generate_video_cover
-            print(f"开始生成4宫格封面...")
+            print(f"[DEBUG] 开始生成4宫格封面...")
             cover_image, cover_video = generate_video_cover(
                 original_video_list, 
                 video_output_dir,
@@ -255,11 +340,11 @@ class VideoMergeService:
             )
             if cover_image:
                 st.session_state["generated_cover_image"] = cover_image
-                print(f"封面图片已生成: {cover_image}")
+                print(f"[DEBUG] 封面图片已生成: {cover_image}")
             else:
-                print("封面图片生成失败")
+                print(f"[WARNING] 封面图片生成失败")
         elif self.enable_auto_cover and len(original_video_list) < 4:
-            print(f"视频数量不足4个，当前只有 {len(original_video_list)} 个视频，跳过封面生成")
+            print(f"[DEBUG] 视频数量不足4个，当前只有 {len(original_video_list)} 个视频，跳过封面生成")
         
         for media_file in self.video_list:
             # 如果当前文件是图片，添加转换为视频的命令
@@ -299,66 +384,86 @@ class VideoMergeService:
                 video_duration = get_video_duration(media_file)
                 video_width, video_height = get_video_info(media_file)
                 output_name = generate_temp_filename(media_file, new_directory=work_output_dir)
-                # 不需要拉伸也不需要裁剪，只需要调整分辨率和fps
+                
+                # 提取用户名
+                username = extract_username_from_filename(media_file) if self.show_username else None
+                
+                # 构建视频滤镜
+                print(f"[DEBUG] 正在处理视频: {media_file}")
+                print(f"[DEBUG] 原始视频信息 - 宽度: {video_width}, 高度: {video_height}, 时长: {video_duration}")
+                
                 if video_width / video_height > self.target_width / self.target_height:
-                    command = [
-                        'ffmpeg',
-                        '-i', media_file,  # 输入文件
-                        '-r', str(self.fps),  # 设置帧率
-                        '-vf',
-                        f"scale=-1:{self.target_height}:force_original_aspect_ratio=1,crop={self.target_width}:{self.target_height}:(ow-iw)/2:(oh-ih)/2",
-                        # 设置视频滤镜来调整分辨率
-                        # '-vf', f'crop={self.target_width}:{self.target_height}:(ow-iw)/2:(oh-ih)/2',
-                        '-y',
-                        output_name  # 输出文件
-                    ]
+                    base_scale = f"scale=-1:{self.target_height}:force_original_aspect_ratio=1,crop={self.target_width}:{self.target_height}:(ow-iw)/2:(oh-ih)/2"
+                else:
+                    base_scale = f"scale={self.target_width}:-1:force_original_aspect_ratio=1,crop={self.target_width}:{self.target_height}:(ow-iw)/2:(oh-ih)/2"
+                
+                print(f"[DEBUG] 目标尺寸: {self.target_width}x{self.target_height}@{self.fps}fps")
+                print(f"[DEBUG] 缩放滤镜: {base_scale}")
+                
+                # 如果需要显示用户名，添加水印
+                if username:
+                    username_img = generate_temp_filename(output_name, "_username.png", work_output_dir)
+                    if render_username_image(username, username_img, width=300, font_size=28):
+                        vf = f"{base_scale},format=yuv420p[out];[out][1:v]overlay=(W-w)/2:10[out]"
+                        command = [
+                            'ffmpeg',
+                            '-i', media_file,
+                            '-i', username_img,
+                            '-filter_complex', vf,
+                            '-map', '0:a?',
+                            '-map', '[out]',
+                            '-r', str(self.fps),
+                            '-y',
+                            output_name
+                        ]
+                    else:
+                        command = [
+                            'ffmpeg',
+                            '-i', media_file,
+                            '-vf', base_scale,
+                            '-r', str(self.fps),
+                            '-map', '0:v',
+                            '-map', '0:a?',
+                            '-y',
+                            output_name
+                        ]
                 else:
                     command = [
                         'ffmpeg',
-                        '-i', media_file,  # 输入文件
-                        '-r', str(self.fps),  # 设置帧率
-                        '-vf',
-                        f"scale={self.target_width}:-1:force_original_aspect_ratio=1,crop={self.target_width}:{self.target_height}:(ow-iw)/2:(oh-ih)/2",
-                        # 设置视频滤镜来调整分辨率
-                        # '-vf', f'crop={self.target_width}:{self.target_height}:(ow-iw)/2:(oh-ih)/2',
+                        '-i', media_file,
+                        '-vf', base_scale,
+                        '-r', str(self.fps),
+                        '-map', '0:v',
+                        '-map', '0:a?',
                         '-y',
-                        output_name  # 输出文件
+                        output_name
                     ]
+                
                 # 执行FFmpeg命令
+                print(f"[DEBUG] 执行FFmpeg命令:")
                 print(" ".join(command))
                 run_ffmpeg_command(command)
-
+                
+                # 检查输出文件是否生成成功
+                if os.path.exists(output_name):
+                    file_size = os.path.getsize(output_name)
+                    print(f"[DEBUG] FFmpeg输出文件生成成功: {output_name}, 大小: {file_size} bytes")
+                else:
+                    print(f"[ERROR] FFmpeg输出文件未生成: {output_name}")
+                
                 # 应用原创性提升处理
+                print(f"[DEBUG] 开始应用原创性提升处理: {output_name}")
                 processed_file = self.originality_service.process_video(
                     output_name,
                     # 随机起点
                     enable_random_start=self.enable_originality,
                     max_offset=self.random_start_max_offset,
                     max_duration=self.random_start_max_duration,
-                    # 变速
-                    enable_speed_change=self.enable_speed_change,
-                    speed_range=(self.speed_range_min, self.speed_range_max),
-                    # 镜像
-                    enable_mirror=self.enable_mirror,
-                    mirror_direction=self.mirror_direction,
-                    # 缩放
-                    enable_random_crop=self.enable_random_crop,
-                    crop_scale_range=(self.crop_scale_min, self.crop_scale_max),
                     # 噪点
                     enable_noise=self.enable_noise,
                     noise_intensity=self.noise_intensity,
-                    # 速度渐变
-                    enable_speed_ramp=self.enable_speed_ramp,
-                    speed_ramp_type=self.speed_ramp_type,
                     # 滤镜
                     filter_preset=self.filter_preset,
-                    # 水印
-                    watermark_path=self.watermark_path if self.watermark_path else None,
-                    watermark_position=self.watermark_position,
-                    watermark_opacity=self.watermark_opacity,
-                    watermark_scale=self.watermark_scale,
-                    # 音频
-                    remove_original_audio=self.remove_original_audio
                 )
                 return_video_list.append(processed_file)
 
@@ -376,33 +481,53 @@ class VideoMergeService:
 
     def _normalize_video_sizes(self, video_list):
         """标准化视频尺寸和帧率，确保所有视频完全一致"""
+        print(f"[DEBUG] 开始标准化视频尺寸，共 {len(video_list)} 个视频")
         normalized_list = []
-        for video_file in video_list:
+        for i, video_file in enumerate(video_list):
+            print(f"[DEBUG] 标准化第 {i+1}/{len(video_list)} 个视频: {video_file}")
             output_file = generate_temp_filename(video_file, "_norm.mp4", work_output_dir)
             command = [
                 'ffmpeg', '-i', video_file,
                 '-vf', f"scale={self.target_width}:{self.target_height}:force_original_aspect_ratio=increase,crop={self.target_width}:{self.target_height},setsar=1,fps={self.fps}",
                 '-r', str(self.fps),
-                '-c:v', 'libx264', '-preset', 'fast', '-y', output_file
+                '-c:v', 'libx264', '-preset', 'fast',
+                '-map', '0:v',
+                '-map', '0:a?',
+                '-y', output_file
             ]
-            print(f"标准化视频: {self.target_width}x{self.target_height}@{self.fps}fps")
+            print(f"[DEBUG] 标准化视频: {self.target_width}x{self.target_height}@{self.fps}fps")
+            print(f"[DEBUG] FFmpeg命令: {' '.join(command)}")
             run_ffmpeg_command(command)
             if os.path.exists(output_file):
+                file_size = os.path.getsize(output_file)
+                print(f"[DEBUG] 标准化成功，输出文件: {output_file}, 大小: {file_size} bytes")
                 normalized_list.append(output_file)
             else:
+                print(f"[ERROR] 标准化失败，保持原文件: {video_file}")
                 normalized_list.append(video_file)
         return normalized_list
 
     def generate_video_with_bg_music(self):
         # 生成视频和音频的代码
+        print(f"[DEBUG] ========== 开始生成最终视频 ==========")
+        print(f"[DEBUG] 视频列表共 {len(self.video_list)} 个:")
+        for i, v in enumerate(self.video_list):
+            if os.path.exists(v):
+                size = os.path.getsize(v)
+                print(f"[DEBUG]   [{i+1}] {v} ({size} bytes)")
+            else:
+                print(f"[DEBUG]   [{i+1}] {v} (文件不存在!)")
+        
         random_name = str(random_with_system_time())
         merge_video = os.path.join(video_output_dir, "final-" + random_name + ".mp4")
         temp_video_filelist_path = os.path.join(video_output_dir, 'generate_video_with_bg_file_list.txt')
 
         # 创建包含所有视频文件的文本文件
+        print(f"[DEBUG] 创建视频文件列表: {temp_video_filelist_path}")
         with open(temp_video_filelist_path, 'w') as f:
             for video_file in self.video_list:
                 f.write(f"file '{video_file}'\n")
+                print(f"[DEBUG]   添加: {video_file}")
 
         # 拼接视频
         ffmpeg_concat_cmd = ['ffmpeg',
@@ -433,6 +558,8 @@ class VideoMergeService:
                     videos_with_audio.append(video_file)
             except:
                 pass
+        
+        print(f"[DEBUG] 音频检查 - has_audio: {has_audio}, videos_with_audio数量: {len(videos_with_audio)}")
 
         # 如果有封面视频，需要单独处理
         has_cover = any('cover_video' in v for v in self.video_list)
@@ -441,64 +568,216 @@ class VideoMergeService:
         if self.enable_video_transition_effect and len(self.video_list) > 1:
             # 获取实际有音频的视频时长
             real_videos = [v for v in self.video_list if 'cover_video' not in v]
-            if len(real_videos) > 1:
+            if len(real_videos) <= 1:
+                print("视频数量不足1个，执行简单拼接")
+                with open(temp_video_filelist_path, 'w') as f:
+                    for video_file in self.video_list:
+                        f.write(f"file '{video_file}'\n")
+                ffmpeg_concat_cmd = ['ffmpeg',
+                                     '-f', 'concat', '-safe', '0',
+                                     '-i', temp_video_filelist_path,
+                                     '-c:v', 'libx264', '-preset', 'fast',
+                                     '-c:a', 'aac', '-b:a', '128k',
+                                     '-r', str(self.fps),
+                                     '-y', merge_video]
+                print(f"[DEBUG] 简单拼接FFmpeg命令: {' '.join(ffmpeg_concat_cmd)}")
+                result = subprocess.run(ffmpeg_concat_cmd, capture_output=True, encoding='utf-8', errors='replace')
+                if result.returncode != 0:
+                    print(f"[ERROR] 简单拼接FFmpeg失败:")
+                    print(result.stderr if result.stderr else "Unknown error")
+            else:
+                # 多个视频，使用xfade转场
+                print("启动转场特效（视频xfade转场）")
                 video_length_list = get_video_length_list(real_videos)
-                video_length_list = [float(length) if length else 5.0 for length in video_length_list]
-                
-                # 只对有音频的视频使用音频转场
-                use_audio_transition = has_audio and len(videos_with_audio) > 1
-                
-                if use_audio_transition:
-                    print("启动转场特效（带音频）")
-                    zhuanchang_txt = gen_filter(video_length_list, None, None,
-                                                self.video_transition_effect_type,
-                                                self.video_transition_effect_value,
-                                                self.video_transition_effect_duration,
-                                                True)
+                zhuanchang_txt = gen_filter(video_length_list, None, None,
+                                            self.video_transition_effect_type,
+                                            self.video_transition_effect_value,
+                                            self.video_transition_effect_duration,
+                                            False)
 
-                    # File inputs from the list
-                    files_input = [['-i', f] for f in real_videos]
-                    ffmpeg_concat_cmd = ['ffmpeg', *itertools.chain(*files_input),
-                                         '-filter_complex', zhuanchang_txt,
-                                         '-map', '[video]',
-                                         '-map', '[audio]',
-                                         '-y',
-                                         merge_video]
-                    subprocess.run(ffmpeg_concat_cmd)
+                files_input = [['-i', f] for f in real_videos]
+                
+                # 第一步：生成视频xfade（不包含音频）
+                ffmpeg_concat_cmd = ['ffmpeg', *itertools.chain(*files_input),
+                                     '-filter_complex', zhuanchang_txt,
+                                     '-map', '[video]',
+                                     '-c:v', 'libx264', '-preset', 'fast',
+                                     '-r', str(self.fps),
+                                     '-y',
+                                     merge_video]
+                print(f"[DEBUG] FFmpeg转场命令: {' '.join(ffmpeg_concat_cmd)}")
+                result = subprocess.run(ffmpeg_concat_cmd, capture_output=True, encoding='utf-8', errors='replace')
+                if result.returncode != 0:
+                    print(f"[ERROR] 转场特效FFmpeg失败:")
+                    print(result.stderr if result.stderr else "Unknown error")
                 else:
-                    print("启动转场特效（仅视频）")
-                    zhuanchang_txt = gen_filter(video_length_list, None, None,
-                                                self.video_transition_effect_type,
-                                                self.video_transition_effect_value,
-                                                self.video_transition_effect_duration,
-                                                False)
-
-                    files_input = [['-i', f] for f in real_videos]
-                    ffmpeg_concat_cmd = ['ffmpeg', *itertools.chain(*files_input),
-                                         '-filter_complex', zhuanchang_txt,
-                                         '-map', '[video]',
-                                         '-y',
-                                         merge_video]
-                    subprocess.run(ffmpeg_concat_cmd)
-                
-                # 如果有封面视频，拼接封面到最前面
-                if has_cover:
-                    cover_video = next(v for v in self.video_list if 'cover_video' in v)
-                    # 先保存合并的视频
-                    temp_merge = merge_video.replace('.mp4', '_no_cover.mp4')
-                    if os.path.exists(merge_video):
-                        os.rename(merge_video, temp_merge)
-                    # 拼接封面
+                    print("[DEBUG] 转场视频生成成功")
+                    
+                    # 第二步：拼接音频并混合到视频
+                    if has_audio:
+                        print("[DEBUG] 开始拼接音频...")
+                        audio_list_file = os.path.join(video_output_dir, 'audio_list.txt')
+                        with open(audio_list_file, 'w', encoding='utf-8') as f:
+                            for v in real_videos:
+                                f.write(f"file '{v}'\n")
+                        
+                        temp_audio = merge_video.replace('.mp4', '_audio.aac')
+                        temp_audio_cmd = ['ffmpeg', '-y',
+                                         '-f', 'concat', '-safe', '0',
+                                         '-i', audio_list_file,
+                                         '-c:a', 'copy',
+                                         '-vn',
+                                         temp_audio]
+                        print(f"[DEBUG] 音频拼接命令: {' '.join(temp_audio_cmd)}")
+                        result = subprocess.run(temp_audio_cmd, capture_output=True, encoding='utf-8', errors='replace')
+                        
+                        if result.returncode == 0 and os.path.exists(temp_audio):
+                            # 检查合并后音频的时长
+                            audio_duration = 0
+                            try:
+                                probe = subprocess.run(
+                                    ['ffprobe', '-v', 'error', '-show_entries', 'format=duration',
+                                     '-of', 'default=noprint_wrappers=1:nokey=1', temp_audio],
+                                    capture_output=True, text=True
+                                )
+                                audio_duration = float(probe.stdout.strip())
+                            except:
+                                pass
+                            
+                            # 将音频混合到视频
+                            temp_video_with_audio = merge_video.replace('.mp4', '_with_audio.mp4')
+                            mix_cmd = ['ffmpeg', '-y',
+                                      '-i', merge_video,
+                                      '-i', temp_audio,
+                                      '-c:v', 'copy',
+                                      '-c:a', 'aac', '-b:a', '128k',
+                                      '-shortest',
+                                      temp_video_with_audio]
+                            print(f"[DEBUG] 混合音视频命令: {' '.join(mix_cmd)}")
+                            result = subprocess.run(mix_cmd, capture_output=True, encoding='utf-8', errors='replace')
+                            
+                            if result.returncode == 0 and os.path.exists(temp_video_with_audio):
+                                os.remove(merge_video)
+                                os.rename(temp_video_with_audio, merge_video)
+                                print("[DEBUG] 音频拼接成功")
+                            else:
+                                print(f"[ERROR] 混合音视频失败: {result.stderr if result.stderr else 'Unknown error'}")
+                            if os.path.exists(temp_audio):
+                                os.remove(temp_audio)
+                        else:
+                            print(f"[ERROR] 音频拼接失败: {result.stderr if result.stderr else 'Unknown error'}")
+                        
+                        if os.path.exists(audio_list_file):
+                            os.remove(audio_list_file)
+            
+            # 如果有封面视频，拼接封面到最前面
+            if has_cover:
+                cover_video = next(v for v in self.video_list if 'cover_video' in v)
+                # 先保存合并的视频
+                temp_merge = merge_video.replace('.mp4', '_no_cover.mp4')
+                if os.path.exists(merge_video) and os.path.getsize(merge_video) > 1000:
+                    os.rename(merge_video, temp_merge)
+                    
+                    # 检查合并后的视频是否有音频
+                    temp_has_audio = False
+                    try:
+                        result = subprocess.run(
+                            ['ffprobe', '-v', 'error', '-select_streams', 'a:0', '-show_entries', 'stream=codec_type', 
+                             '-of', 'csv=p=0', temp_merge],
+                            capture_output=True, text=True
+                        )
+                        temp_has_audio = 'audio' in result.stdout.lower()
+                    except:
+                        pass
+                    
+                    # 拼接封面 - 强制重新编码以避免时间戳问题
                     concat_file = temp_merge.replace('.mp4', '_concat.txt')
                     with open(concat_file, 'w') as f:
                         f.write(f"file '{cover_video}'\n")
                         f.write(f"file '{temp_merge}'\n")
-                    concat_cmd = ['ffmpeg', '-f', 'concat', '-safe', '0', '-i', concat_file,
-                                  '-c', 'copy', '-y', merge_video]
-                    subprocess.run(concat_cmd)
+                    
+                    # 强制重新编码而不是copy模式
+                    concat_cmd = ['ffmpeg',
+                                  '-f', 'concat', '-safe', '0', '-i', concat_file,
+                                  '-c:v', 'libx264', '-preset', 'fast',
+                                  '-c:a', 'aac', '-b:a', '128k',
+                                  '-r', str(self.fps),
+                                  '-y', merge_video]
+                    print(f"[DEBUG] 封面拼接FFmpeg命令: {' '.join(concat_cmd)}")
+                    subprocess.run(concat_cmd, capture_output=True, encoding='utf-8', errors='replace')
+                    
+                    # 验证最终视频
+                    if os.path.exists(merge_video):
+                        final_size = os.path.getsize(merge_video)
+                        print(f"[DEBUG] 最终视频已生成: {merge_video}, 大小: {final_size} bytes")
+                        if final_size < 1000:
+                            print(f"[ERROR] 最终视频文件过小，可能生成失败!")
+                    else:
+                        print(f"[ERROR] 最终视频文件未生成!")
+                    
+                    # 验证合并后的视频是否有音频
+                    final_has_audio = False
+                    try:
+                        result = subprocess.run(
+                            ['ffprobe', '-v', 'error', '-select_streams', 'a:0', '-show_entries', 'stream=codec_type', 
+                             '-of', 'csv=p=0', merge_video],
+                            capture_output=True, text=True
+                        )
+                        final_has_audio = 'audio' in result.stdout.lower()
+                        print(f"[DEBUG] 最终视频音频检查 - has_audio: {final_has_audio}")
+                    except:
+                        pass
+                    
                     # 清理临时文件
-                    os.remove(temp_merge)
-                    os.remove(concat_file)
+                    if os.path.exists(temp_merge):
+                        os.remove(temp_merge)
+                    if os.path.exists(concat_file):
+                        os.remove(concat_file)
+                else:
+                    print(f"警告: 转场特效生成失败，跳过封面拼接")
+                    # 删除无效文件
+                    if os.path.exists(merge_video):
+                        os.remove(merge_video)
+            else:
+                # 不启用转场特效时，使用简单拼接
+                print("不启用转场特效，执行简单视频拼接（强制重新编码）")
+                # 重新构建文件列表（包含所有视频）
+                with open(temp_video_filelist_path, 'w') as f:
+                    for video_file in self.video_list:
+                        f.write(f"file '{video_file}'\n")
+                # 使用强制重新编码而不是copy模式，避免时间戳问题
+                ffmpeg_concat_cmd = ['ffmpeg',
+                                     '-f', 'concat',
+                                     '-safe', '0',
+                                     '-i', temp_video_filelist_path,
+                                     '-c:v', 'libx264', '-preset', 'fast',
+                                     '-c:a', 'aac', '-b:a', '128k',
+                                     '-r', str(self.fps),
+                                     '-y',
+                                     merge_video]
+                print(f"[DEBUG] 简单拼接FFmpeg命令: {' '.join(ffmpeg_concat_cmd)}")
+                result = subprocess.run(ffmpeg_concat_cmd, capture_output=True, encoding='utf-8', errors='replace')
+                if result.returncode != 0:
+                    print(f"[ERROR] 简单拼接FFmpeg失败:")
+                    print(result.stderr if result.stderr else "Unknown error")
+        else:
+            # 不启用转场特效且视频数量 <= 1
+            print("视频数量不足或未启用转场，执行简单视频拼接（强制重新编码）")
+            # 使用强制重新编码而不是copy模式，避免时间戳问题
+            ffmpeg_concat_cmd = ['ffmpeg',
+                                 '-f', 'concat',
+                                 '-safe', '0',
+                                 '-i', temp_video_filelist_path,
+                                 '-c:v', 'libx264', '-preset', 'fast',
+                                 '-c:a', 'aac', '-b:a', '128k',
+                                 '-r', str(self.fps),
+                                 '-y',
+                                 merge_video]
+            print(f"[DEBUG] 简单拼接FFmpeg命令: {' '.join(ffmpeg_concat_cmd)}")
+            result = subprocess.run(ffmpeg_concat_cmd, capture_output=True, encoding='utf-8', errors='replace')
+            if result.returncode != 0:
+                print(f"[ERROR] 简单拼接FFmpeg失败:")
+                print(result.stderr if result.stderr else "Unknown error")
         # 删除临时文件
         os.remove(temp_video_filelist_path)
 
