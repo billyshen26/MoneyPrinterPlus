@@ -230,11 +230,11 @@ with transition_container:
             help="转场效果持续的时间"
         )
     with llm_columns[2]:
-        st.text_input(
-            label="自定义水印文字",
-            key="sequential_watermark_text",
-            placeholder="留空则自动提取文件名中的用户名",
-            help="如果留空，将从文件名中提取用户名（格式: fav_用户名_ID.mp4）"
+        st.checkbox(
+            label="显示出境小姐姐水印",
+            key="sequential_show_username_watermark",
+            value=True,
+            help="启用后将在视频左上角显示 '出境小姐姐：用户名' 水印"
         )
     with llm_columns[3]:
         watermark_position_options = {
@@ -246,8 +246,9 @@ with transition_container:
         st.selectbox(
             label="水印位置",
             key="sequential_watermark_position",
-            options=watermark_position_options,
+            options=list(watermark_position_options.keys()),
             format_func=lambda x: watermark_position_options[x],
+            index=0,  # 默认左上角
             help="水印在视频中的位置"
         )
 
@@ -261,8 +262,9 @@ with filter_container:
         st.selectbox(
             label="滤镜强度",
             key="sequential_filter_preset",
-            options=filter_options,
+            options=list(filter_options.keys()),
             format_func=lambda x: filter_options[x],
+            index=1,  # 默认选择"轻微"
             help="应用色彩滤镜以提升原创性"
         )
     with llm_columns[1]:
@@ -279,9 +281,10 @@ with cover_container:
         st.radio(
             label="封面类型",
             key="sequential_cover_type",
-            options=cover_type_options,
+            options=list(cover_type_options.keys()),
             format_func=lambda x: cover_type_options[x],
             horizontal=True,
+            index=1,  # 默认选择"4宫格封面"
             help="视频封面样式（4宫格需要4个视频，9宫格需要9个视频）"
         )
     with llm_columns[1]:

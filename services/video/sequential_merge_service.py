@@ -71,9 +71,10 @@ def extract_username_from_filename(filename):
     return None
 
 
-def render_username_image(username, output_path, width=300, font_size=28):
-    """用 Pillow 把用户名渲染成白字透明底图片"""
+def render_username_image(username, output_path, prefix="出境小姐姐：", width=400, font_size=28):
+    """用 Pillow 把用户名渲染成白字透明底图片，支持前缀"""
     try:
+        full_text = f"{prefix}{username}" if prefix else username
         img = Image.new('RGBA', (width, font_size + 20), color=(0, 0, 0, 0))
         draw = ImageDraw.Draw(img)
         font = None
@@ -83,12 +84,12 @@ def render_username_image(username, output_path, width=300, font_size=28):
                 break
         if font is None:
             font = ImageFont.load_default()
-        bbox = draw.textbbox((0, 0), username, font=font)
+        bbox = draw.textbbox((0, 0), full_text, font=font)
         text_w = bbox[2] - bbox[0]
         text_h = bbox[3] - bbox[1]
-        x = (width - text_w) // 2
-        y = 4
-        draw.text((x, y), username, fill=(255, 255, 255), font=font, stroke_width=2, stroke_fill=(0, 0, 0))
+        x = 10
+        y = 8
+        draw.text((x, y), full_text, fill=(255, 255, 255), font=font, stroke_width=2, stroke_fill=(0, 0, 0))
         img.save(output_path)
         return True
     except Exception as e:
@@ -124,7 +125,8 @@ class SequentialMergeService:
         self.background_music_volume = st.session_state.get("sequential_background_music_volume", 0.3)
 
         self.enable_originality = st.session_state.get("sequential_enable_originality", True)
-        self.filter_preset = st.session_state.get("sequential_filter_preset", "none")
+        self.filter_preset = st.session_state.get("sequential_filter_preset", "light")
+        self.show_username_watermark = st.session_state.get("sequential_show_username_watermark", True)
 
         self.originality_service = OriginalityService(work_output_dir)
 
@@ -171,12 +173,24 @@ class SequentialMergeService:
             else:
                 base_scale = f"scale={self.target_width}:-1:force_original_aspect_ratio=1,crop={self.target_width}:{self.target_height}:(ow-iw)/2:(oh-ih)/2"
 
-            username = extract_username_from_filename(video_file) if not self.watermark_text else self.watermark_text
+            username = None
+            if self.show_username_watermark:
+                username = extract_username_from_filename(video_file)
 
             if username:
                 username_img = generate_temp_filename(output_name, "_username.png", work_output_dir)
-                if render_username_image(username, username_img, width=300, font_size=28):
-                    vf = f"{base_scale},format=yuv420p[out];[out][1:v]overlay=(W-w)/2:10[out]"
+                if render_username_image(username, username_img, prefix="出境小姐姐：", width=400, font_size=28):
+                    # 根据水印位置计算 overlay 坐标
+                    if self.watermark_position == "top_left":
+                        overlay_pos = "10:10"
+                    elif self.watermark_position == "top_right":
+                        overlay_pos = "(W-w-10):10"
+                    elif self.watermark_position == "bottom_left":
+                        overlay_pos = "10:(H-h-10)"
+                    else:  # bottom_right
+                        overlay_pos = "(W-w-10):(H-h-10)"
+
+                    vf = f"{base_scale},format=yuv420p[out];[out][1:v]overlay={overlay_pos}[out]"
                     command = [
                         'ffmpeg', '-i', video_file,
                         '-i', username_img,

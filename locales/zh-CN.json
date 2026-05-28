@@ -169,6 +169,8 @@
   "Transition Type": "转场类型",
   "Transition Duration": "转场时长",
   "Watermark Text": "水印文字",
+  "Show Username Watermark": "显示出境小姐姐水印",
+  "Enable to show username watermark in video": "启用后将在视频左上角显示 '出境小姐姐：用户名' 水印",
   "Watermark Position": "水印位置",
   "Cover Type": "封面类型",
   "Cover Timestamp": "封面截取时间",
