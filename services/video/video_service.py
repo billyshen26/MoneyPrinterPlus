@@ -27,6 +27,7 @@ import os
 import random
 import re
 import subprocess
+import asyncio
 from typing import List
 import streamlit as st
 
@@ -404,7 +405,115 @@ def add_text_to_cover(input_image, output_image, line1=None, line2=None):
         return False
 
 
+async def _generate_cover_tts_async(text, output_audio):
+    """异步生成封面语音"""
+    try:
+        import edge_tts
+        # 使用 XiaoyiNeural - 标准中文女声，发音准确
+        voice = "zh-CN-XiaoyiNeural"
+        communicate = edge_tts.Communicate(text, voice=voice, rate="+0%", pitch="+0Hz")
+        await communicate.save(output_audio)
+        print(f"[封面语音] 使用声音: {voice}")
+        return True
+    except Exception as e:
+        print(f"生成封面语音失败: {e}")
+        # 备用声音 XiaoxiaoNeural
+        try:
+            import edge_tts
+            voice = "zh-CN-XiaoxiaoNeural"
+            communicate = edge_tts.Communicate(text, voice=voice, rate="+0%", pitch="+0Hz")
+            await communicate.save(output_audio)
+            print(f"[封面语音] 备用声音: {voice}")
+            return True
+        except Exception as e2:
+            print(f"备用声音也失败: {e2}")
+            return False
+
+
+def generate_cover_tts(line1, line2, output_audio):
+    """生成封面文字的语音（温柔女生声音）"""
+    # 组合两行文字
+    if line1 and line2:
+        text = f"{line1}，{line2}"
+    elif line1:
+        text = line1
+    elif line2:
+        text = line2
+    else:
+        return None
+
+    print(f"[封面语音] 生成语音: {text}")
+    try:
+        asyncio.run(_generate_cover_tts_async(text, output_audio))
+        if os.path.exists(output_audio):
+            print(f"[封面语音] 已生成: {output_audio}")
+            return output_audio
+    except Exception as e:
+        print(f"[封面语音] 生成失败: {e}")
+    return None
+
+
+def get_audio_duration(audio_file):
+    """获取音频文件时长（秒）"""
+    try:
+        # 使用 ffprobe 获取音频时长
+        result = subprocess.run([
+            'ffprobe', '-v', 'error', '-show_entries', 'format=duration',
+            '-of', 'default=noprint_wrappers=1:nokey=1', audio_file
+        ], capture_output=True, text=True, encoding='utf-8')
+        duration = float(result.stdout.strip())
+        print(f"[音频时长] {audio_file}: {duration}秒")
+        return duration
+    except Exception as e:
+        print(f"获取音频时长失败: {e}")
+        return 3.0  # 默认3秒
+
+
+def create_cover_video_with_audio(image_file, duration, fps, width, height, output_video, audio_file=None):
+    """将图片转换为视频，可选添加音频"""
+    if audio_file and os.path.exists(audio_file):
+        # 获取音频时长
+        audio_duration = get_audio_duration(audio_file)
+        video_duration = max(duration, audio_duration)
+
+        # 使用音频作为音频源，视频时长与音频对齐
+        command = [
+            'ffmpeg',
+            '-loop', '1', '-i', image_file,
+            '-i', audio_file,
+            '-t', str(video_duration),
+            '-r', str(fps),
+            '-vf', f'scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height}',
+            '-c:v', 'libx264', '-preset', 'fast',
+            '-pix_fmt', 'yuv420p',
+            '-c:a', 'aac', '-ar', '44100', '-ac', '2',
+            '-shortest',
+            '-y', output_video
+        ]
+    else:
+        # 无音频，使用静音
+        command = [
+            'ffmpeg',
+            '-loop', '1', '-i', image_file,
+            '-f', 'lavfi', '-i', f'anullsrc=r=44100:cl=stereo',
+            '-t', str(duration),
+            '-r', str(fps),
+            '-vf', f'scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height}',
+            '-c:v', 'libx264', '-preset', 'fast',
+            '-pix_fmt', 'yuv420p',
+            '-c:a', 'aac', '-ar', '44100', '-ac', '2',
+            '-shortest',
+            '-y', output_video
+        ]
+
+    print(f"封面图转视频: {image_file} -> {output_video}")
+    subprocess.run(command, capture_output=True)
+    return os.path.exists(output_video)
+
+
 def create_cover_video(image_file, duration, fps, width, height, output_video):
+    """将图片转换为视频（带静音音频流）"""
+    return create_cover_video_with_audio(image_file, duration, fps, width, height, output_video, None)
     """将图片转换为视频（带静音音频流）"""
     # 使用 anullsrc 创建静音音频流，确保拼接时音频流不会被丢弃
     command = [
@@ -480,20 +589,26 @@ def generate_video_cover(video_list, output_dir, video_width, video_height, fps,
     else:
         print("创建4宫格封面失败")
         return None, None
-    
+
     # 清理帧图片
     for f in frame_files:
         if os.path.exists(f):
             os.remove(f)
-    
-    # 创建封面视频（2秒）
+
+    # 生成封面语音
+    cover_audio = None
+    if line1 or line2:
+        cover_audio_file = os.path.join(output_dir, 'cover_audio.mp3')
+        cover_audio = generate_cover_tts(line1, line2, cover_audio_file)
+
+    # 创建封面视频（使用语音时长）
     cover_video = os.path.join(output_dir, 'cover_video.mp4')
-    if create_cover_video(cover_image, 2, fps, video_width, video_height, cover_video):
+    if create_cover_video_with_audio(cover_image, 2, fps, video_width, video_height, cover_video, cover_audio):
         print(f"封面视频已创建: {cover_video}")
     else:
         print("创建封面视频失败")
         return None, None
-    
+
     # 清理临时目录（保留封面图和封面视频，它们已保存到output_dir）
     try:
         import shutil
@@ -501,7 +616,7 @@ def generate_video_cover(video_list, output_dir, video_width, video_height, fps,
             shutil.rmtree(temp_dir)
     except:
         pass
-    
+
     return cover_image, cover_video
 
 
