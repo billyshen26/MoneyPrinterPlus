@@ -30,11 +30,10 @@ import uuid
 import streamlit as st
 from PIL import Image, ImageDraw, ImageFont
 
-from services.video.originality_service import OriginalityService
 from services.video.texiao_service import gen_filter
 from services.video.video_service import (
     get_video_duration, get_video_info, get_video_length_list,
-    add_background_music, generate_video_cover
+    generate_video_cover
 )
 from tools.file_utils import generate_temp_filename
 from tools.utils import random_with_system_time, run_ffmpeg_command
@@ -120,19 +119,11 @@ class SequentialMergeService:
         self.target_width = int(self.target_width)
         self.target_height = int(self.target_height)
 
-        self.enable_background_music = st.session_state.get("sequential_enable_background_music", False)
-        self.background_music = st.session_state.get("sequential_background_music", "")
-        self.background_music_volume = st.session_state.get("sequential_background_music_volume", 0.3)
-
-        self.enable_originality = st.session_state.get("sequential_enable_originality", True)
-        self.filter_preset = st.session_state.get("sequential_filter_preset", "light")
         self.show_username_watermark = st.session_state.get("sequential_show_username_watermark", True)
 
         # 封面文字
         self.cover_line1 = st.session_state.get("sequential_cover_line1", "盘点漂亮小姐姐")
         self.cover_line2 = st.session_state.get("sequential_cover_line2", "你最喜欢哪一位")
-
-        self.originality_service = OriginalityService(work_output_dir)
 
     def process_videos(self):
         """主处理流程"""
@@ -150,13 +141,10 @@ class SequentialMergeService:
 
         final_video = self._concatenate_videos(normalized_videos)
 
-        if final_video and self.enable_background_music and self.background_music:
-            add_background_music(final_video, self.background_music, self.background_music_volume)
-
         return final_video
 
     def _normalize_videos(self):
-        """标准化视频尺寸和添加水印"""
+        """标准化视频尺寸和添加水印，直接截取保持原始质量"""
         print(f"[SequentialMerge] 开始标准化视频，共 {len(self.video_list)} 个")
 
         normalized_list = []
@@ -170,17 +158,21 @@ class SequentialMergeService:
 
             output_name = generate_temp_filename(video_file, "_seq.mp4", work_output_dir)
 
+            # 获取视频信息
             video_width, video_height = get_video_info(video_file)
 
-            if video_width / video_height > self.target_width / self.target_height:
-                base_scale = f"scale=-1:{self.target_height}:force_original_aspect_ratio=1,crop={self.target_width}:{self.target_height}:(ow-iw)/2:(oh-ih)/2"
-            else:
-                base_scale = f"scale={self.target_width}:-1:force_original_aspect_ratio=1,crop={self.target_width}:{self.target_height}:(ow-iw)/2:(oh-ih)/2"
-
+            # 提取用户名作为水印
             username = None
             if self.show_username_watermark:
                 username = extract_username_from_filename(video_file)
 
+            # 构建视频滤镜：缩放到目标尺寸，保持高质量
+            if video_width / video_height > self.target_width / self.target_height:
+                base_scale = f"scale=-1:{self.target_height}:force_original_aspect_ratio=1,crop={self.target_width}:{self.target_height}"
+            else:
+                base_scale = f"scale={self.target_width}:-1:force_original_aspect_ratio=1,crop={self.target_width}:{self.target_height}"
+
+            # 构建完整的滤镜链
             if username:
                 username_img = generate_temp_filename(output_name, "_username.png", work_output_dir)
                 if render_username_image(username, username_img, prefix="出镜小姐姐：", width=500, font_size=36):
@@ -196,30 +188,43 @@ class SequentialMergeService:
 
                     vf = f"{base_scale},format=yuv420p[out];[out][1:v]overlay={overlay_pos}[out]"
                     command = [
-                        'ffmpeg', '-i', video_file,
+                        'ffmpeg', '-ss', '0',
+                        '-i', video_file,
                         '-i', username_img,
+                        '-t', str(self.video_duration),
                         '-filter_complex', vf,
                         '-map', '0:a?',
                         '-map', '[out]',
+                        '-c:v', 'libx264', '-preset', 'slow', '-crf', '18',
+                        '-c:a', 'aac', '-b:a', '192k',
                         '-r', str(self.fps),
+                        '-pix_fmt', 'yuv420p',
                         '-y', output_name
                     ]
                 else:
                     command = [
-                        'ffmpeg', '-i', video_file,
-                        '-vf', base_scale,
+                        'ffmpeg', '-ss', '0',
+                        '-i', video_file,
+                        '-t', str(self.video_duration),
+                        '-vf', f"{base_scale},format=yuv420p",
+                        '-c:v', 'libx264', '-preset', 'slow', '-crf', '18',
+                        '-c:a', 'aac', '-b:a', '192k',
                         '-r', str(self.fps),
-                        '-map', '0:v',
-                        '-map', '0:a?',
+                        '-pix_fmt', 'yuv420p',
+                        '-map', '0:v', '-map', '0:a?',
                         '-y', output_name
                     ]
             else:
                 command = [
-                    'ffmpeg', '-i', video_file,
-                    '-vf', base_scale,
+                    'ffmpeg', '-ss', '0',
+                    '-i', video_file,
+                    '-t', str(self.video_duration),
+                    '-vf', f"{base_scale},format=yuv420p",
+                    '-c:v', 'libx264', '-preset', 'slow', '-crf', '18',
+                    '-c:a', 'aac', '-b:a', '192k',
                     '-r', str(self.fps),
-                    '-map', '0:v',
-                    '-map', '0:a?',
+                    '-pix_fmt', 'yuv420p',
+                    '-map', '0:v', '-map', '0:a?',
                     '-y', output_name
                 ]
 
@@ -227,13 +232,7 @@ class SequentialMergeService:
             run_ffmpeg_command(command)
 
             if os.path.exists(output_name):
-                processed_file = self.originality_service.process_video(
-                    output_name,
-                    enable_random_start=self.enable_originality,
-                    filter_preset=self.filter_preset,
-                    max_duration=self.video_duration
-                )
-                normalized_list.append(processed_file)
+                normalized_list.append(output_name)
             else:
                 print(f"[SequentialMerge] FFmpeg输出文件未生成: {output_name}")
 
@@ -271,12 +270,15 @@ class SequentialMergeService:
             for video_file in video_list:
                 f.write(f"file '{video_file}'\n")
 
+        # 使用高质量编码参数
         command = [
             'ffmpeg', '-f', 'concat', '-safe', '0',
             '-i', temp_filelist_path,
-            '-c:v', 'libx264', '-preset', 'fast',
-            '-c:a', 'aac', '-b:a', '128k',
+            '-c:v', 'libx264', '-preset', 'slow', '-crf', '18',
+            '-c:a', 'aac', '-b:a', '192k',
             '-r', str(self.fps),
+            '-pix_fmt', 'yuv420p',
+            '-movflags', '+faststart',
             '-y', merge_video
         ]
 
@@ -320,11 +322,15 @@ class SequentialMergeService:
 
         files_input = [['-i', f] for f in video_list]
 
+        # 使用高质量编码参数
         command = ['ffmpeg', *itertools.chain(*files_input),
                    '-filter_complex', zhuanchang_txt,
                    '-map', '[video]',
-                   '-c:v', 'libx264', '-preset', 'fast',
+                   '-c:v', 'libx264', '-preset', 'slow', '-crf', '18',
+                   '-c:a', 'aac', '-b:a', '192k',
                    '-r', str(self.fps),
+                   '-pix_fmt', 'yuv420p',
+                   '-movflags', '+faststart',
                    '-y', merge_video]
 
         print(f"[SequentialMerge] 转场拼接命令: {' '.join(command)}")
@@ -377,9 +383,11 @@ class SequentialMergeService:
 
                 concat_cmd = [
                     'ffmpeg', '-f', 'concat', '-safe', '0', '-i', concat_file,
-                    '-c:v', 'libx264', '-preset', 'fast',
-                    '-c:a', 'aac', '-b:a', '128k',
+                    '-c:v', 'libx264', '-preset', 'slow', '-crf', '18',
+                    '-c:a', 'aac', '-b:a', '192k',
                     '-r', str(self.fps),
+                    '-pix_fmt', 'yuv420p',
+                    '-movflags', '+faststart',
                     '-y', merge_video
                 ]
 

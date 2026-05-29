@@ -222,7 +222,7 @@ video_container = st.container(border=True)
 with video_container:
     st.subheader("视频配置")
 
-    llm_columns = st.columns(5)
+    llm_columns = st.columns(4)
     with llm_columns[0]:
         video_layout = st.selectbox(
             label="视频布局",
@@ -235,16 +235,17 @@ with video_container:
         st.selectbox(
             label="视频帧率",
             key="sequential_video_fps",
-            options=[20, 25, 30],
-            help="视频帧率"
+            options=[25, 30],
+            index=1,
+            help="视频帧率（推荐30fps保证流畅）"
         )
     with llm_columns[2]:
         if video_layout == "portrait":
-            video_size_options = {"1080x1920": "1080p", "720x1280": "720p", "480x960": "480p"}
+            video_size_options = {"1080x1920": "1080p", "720x1280": "720p"}
         elif video_layout == "landscape":
-            video_size_options = {"1920x1080": "1080p", "1280x720": "720p", "960x480": "480p"}
+            video_size_options = {"1920x1080": "1080p", "1280x720": "720p"}
         else:
-            video_size_options = {"1080x1080": "1080p", "720x720": "720p", "480x480": "480p"}
+            video_size_options = {"1080x1080": "1080p", "720x720": "720p"}
         st.selectbox(
             label="视频尺寸",
             key="sequential_video_size",
@@ -261,13 +262,6 @@ with video_container:
             step=1,
             key="sequential_video_duration",
             help="每个视频截取的时长"
-        )
-    with llm_columns[4]:
-        st.checkbox(
-            label="启用原创性提升",
-            key="sequential_enable_originality",
-            value=True,
-            help="开启后将对视频进行处理以提升原创性"
         )
 
 # 转场与水印配置
@@ -317,24 +311,6 @@ with transition_container:
             help="水印在视频中的位置"
         )
 
-# 滤镜配置
-filter_container = st.container(border=True)
-with filter_container:
-    st.subheader("滤镜配置")
-    llm_columns = st.columns(2)
-    with llm_columns[0]:
-        filter_options = {"none": "无", "light": "轻微", "medium": "中等", "strong": "明显"}
-        st.selectbox(
-            label="滤镜强度",
-            key="sequential_filter_preset",
-            options=list(filter_options.keys()),
-            format_func=lambda x: filter_options[x],
-            index=1,  # 默认选择"轻微"
-            help="应用色彩滤镜以提升原创性"
-        )
-    with llm_columns[1]:
-        st.write("")  # 占位
-
 # 封面设置
 cover_container = st.container(border=True)
 with cover_container:
@@ -382,37 +358,6 @@ with cover_container:
             key="sequential_cover_line2",
             value="你最喜欢哪一位",
             help="封面上的第二行文字"
-        )
-
-# 背景音乐配置
-bgm_container = st.container(border=True)
-with bgm_container:
-    st.subheader("背景音乐")
-
-    llm_columns = st.columns(3)
-    with llm_columns[0]:
-        st.checkbox(
-            label="启用背景音乐",
-            key="sequential_enable_background_music",
-            value=False,
-            help="开启后将为视频添加背景音乐"
-        )
-    with llm_columns[1]:
-        st.text_input(
-            label="背景音乐路径",
-            key="sequential_background_music",
-            placeholder="输入音乐文件路径",
-            help="支持 MP3/WAV 格式"
-        )
-    with llm_columns[2]:
-        st.slider(
-            label="背景音乐音量",
-            min_value=0.1,
-            max_value=1.0,
-            value=0.3,
-            step=0.1,
-            key="sequential_background_music_volume",
-            help="背景音乐的音量大小"
         )
 
 # 生成视频
