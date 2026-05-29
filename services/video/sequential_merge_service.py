@@ -33,7 +33,7 @@ from PIL import Image, ImageDraw, ImageFont
 from services.video.texiao_service import gen_filter
 from services.video.video_service import (
     get_video_duration, get_video_info, get_video_length_list,
-    generate_video_cover
+    generate_video_cover, create_sequential_intro_video
 )
 from tools.file_utils import generate_temp_filename
 from tools.utils import random_with_system_time, run_ffmpeg_command
@@ -44,6 +44,9 @@ video_output_dir = os.path.join(script_dir, "../../final")
 video_output_dir = os.path.abspath(video_output_dir)
 work_output_dir = os.path.join(script_dir, "../../work")
 work_output_dir = os.path.abspath(work_output_dir)
+tmp_output_dir = os.path.join(script_dir, "../../tmp")
+tmp_output_dir = os.path.abspath(tmp_output_dir)
+os.makedirs(tmp_output_dir, exist_ok=True)
 
 
 def get_video_files_from_folder(folder_path):
@@ -122,7 +125,7 @@ class SequentialMergeService:
         self.show_username_watermark = st.session_state.get("sequential_show_username_watermark", True)
 
         # 封面文字
-        self.cover_line1 = st.session_state.get("sequential_cover_line1", "盘点漂亮小姐姐")
+        self.cover_line1 = st.session_state.get("sequential_cover_line1", "盘点漂亮小美女")
         self.cover_line2 = st.session_state.get("sequential_cover_line2", "你最喜欢哪一位")
 
     def process_videos(self):
@@ -248,27 +251,107 @@ class SequentialMergeService:
         random_name = str(random_with_system_time())
         merge_video = os.path.join(video_output_dir, f"sequential-{random_name}.mp4")
 
+        # 在拼接之前，为每个视频创建带有顺序介绍镜头的视频
+        video_with_intros = self._add_intro_to_videos(video_list)
+
         if self.transition_type != "none" and len(video_list) > 1:
             print(f"[SequentialMerge] 使用转场特效: {self.transition_type}")
-            merge_video = self._concatenate_with_transition(video_list)
+            merge_video = self._concatenate_with_transition(video_with_intros)
         else:
             print("[SequentialMerge] 使用简单拼接")
-            merge_video = self._concatenate_simple(video_list)
+            merge_video = self._concatenate_simple(video_with_intros)
 
-        if merge_video and os.path.exists(merge_video) and self.cover_type != "none":
-            self._add_cover(merge_video, video_list)
+        if merge_video and os.path.exists(merge_video):
+            if self.cover_type != "none":
+                self._add_cover(merge_video, video_list)
+            else:
+                print("[SequentialMerge] 无封面设置，直接输出带介绍镜头的视频")
 
         return merge_video
+
+    def _add_intro_to_videos(self, video_list):
+        """为每个视频添加顺序介绍镜头（黑色背景 + 白色文字 + TTS语音）"""
+        print(f"[SequentialMerge] 为 {len(video_list)} 个视频添加顺序介绍镜头")
+
+        video_with_intros = []
+
+        for i, video_file in enumerate(video_list):
+            if not os.path.exists(video_file):
+                print(f"[SequentialMerge] 视频文件不存在: {video_file}")
+                video_with_intros.append(video_file)
+                continue
+
+            # 创建顺序介绍镜头
+            intro_video = create_sequential_intro_video(
+                index=i + 1,  # 第几位（从1开始）
+                width=self.target_width,
+                height=self.target_height,
+                fps=self.fps,
+                output_video=os.path.join(tmp_output_dir, f'intro_{i+1}.mp4'),
+                output_dir=tmp_output_dir
+            )
+
+            if intro_video and os.path.exists(intro_video):
+                # 将介绍镜头和视频合并 - 使用 filter_complex 方法
+                temp_with_intro = os.path.join(tmp_output_dir, f'video_with_intro_{i+1}.mp4')
+
+                # 获取两个视频的信息
+                intro_duration = get_video_duration(intro_video)
+                video_duration = get_video_duration(video_file)
+                total_duration = intro_duration + video_duration
+
+                # 使用 filter_complex 拼接
+                concat_cmd = [
+                    'ffmpeg', '-y',
+                    '-i', intro_video,
+                    '-i', video_file,
+                    '-filter_complex',
+                    f'[0:v][0:a][1:v][1:a]concat=n=2:v=1:a=1[outv][outa]',
+                    '-map', '[outv]', '-map', '[outa]',
+                    '-c:v', 'libx264', '-preset', 'fast', '-crf', '18',
+                    '-c:a', 'aac', '-b:a', '192k',
+                    '-r', str(self.fps),
+                    '-pix_fmt', 'yuv420p',
+                    '-movflags', '+faststart',
+                    temp_with_intro
+                ]
+
+                print(f"[SequentialMerge] 添加介绍镜头: 第{i+1}位 (使用filter_complex)")
+                print(f"[SequentialMerge] 命令: {' '.join(concat_cmd)}")
+                result = subprocess.run(concat_cmd, capture_output=True, encoding='utf-8', errors='replace')
+                print(f"[SequentialMerge] 返回码: {result.returncode}")
+                if result.returncode != 0:
+                    print(f"[SequentialMerge] 拼接失败: {result.stderr[:500]}")
+                if os.path.exists(temp_with_intro):
+                    actual_duration = get_video_duration(temp_with_intro)
+                    print(f"[SequentialMerge] 拼接成功，文件存在: {temp_with_intro}, 时长: {actual_duration:.2f}秒")
+                    video_with_intros.append(temp_with_intro)
+                else:
+                    print(f"[SequentialMerge] 添加介绍镜头失败，使用原视频")
+                    video_with_intros.append(video_file)
+            else:
+                print(f"[SequentialMerge] 介绍镜头不存在，跳过第{i+1}位")
+                video_with_intros.append(video_file)
+
+        print(f"[SequentialMerge] 顺序介绍镜头添加完成，共 {len(video_with_intros)} 个视频")
+        print(f"[SequentialMerge] 待拼接视频列表:")
+        for idx, v in enumerate(video_with_intros):
+            print(f"  [{idx+1}] {v}")
+        return video_with_intros
 
     def _concatenate_simple(self, video_list):
         """简单拼接视频"""
         random_name = str(random_with_system_time())
         merge_video = os.path.join(video_output_dir, f"sequential-{random_name}.mp4")
-        temp_filelist_path = os.path.join(video_output_dir, f'seq_file_list_{random_name}.txt')
+        temp_filelist_path = os.path.join(tmp_output_dir, f'seq_file_list_{random_name}.txt')
 
+        # 将路径转换为正斜杠格式
+        print(f"[SequentialMerge] 简单拼接文件列表:")
         with open(temp_filelist_path, 'w', encoding='utf-8') as f:
             for video_file in video_list:
-                f.write(f"file '{video_file}'\n")
+                video_file_posix = video_file.replace('\\', '/')
+                f.write(f"file '{video_file_posix}'\n")
+                print(f"  - {video_file_posix}")
 
         # 使用高质量编码参数
         command = [
@@ -345,6 +428,9 @@ class SequentialMergeService:
         """添加封面"""
         print(f"[SequentialMerge] 添加封面: {self.cover_type}")
 
+        import uuid
+        random_name = str(uuid.uuid4())[:8]
+
         cover_image = None
         cover_video = None
 
@@ -372,14 +458,17 @@ class SequentialMergeService:
             )
 
         if cover_video and os.path.exists(cover_video):
-            temp_merge = merge_video.replace('.mp4', '_no_cover.mp4')
+            temp_merge = os.path.join(tmp_output_dir, merge_video.replace(video_output_dir, '').lstrip(os.sep))
             if os.path.exists(merge_video):
                 os.rename(merge_video, temp_merge)
 
-                concat_file = temp_merge.replace('.mp4', '_concat.txt')
-                with open(concat_file, 'w') as f:
-                    f.write(f"file '{cover_video}'\n")
-                    f.write(f"file '{temp_merge}'\n")
+                concat_file = os.path.join(tmp_output_dir, f'cover_concat_{random_name}.txt')
+                # 将路径转换为正斜杠格式
+                cover_video_posix = cover_video.replace('\\', '/')
+                temp_merge_posix = temp_merge.replace('\\', '/')
+                with open(concat_file, 'w', encoding='utf-8') as f:
+                    f.write(f"file '{cover_video_posix}'\n")
+                    f.write(f"file '{temp_merge_posix}'\n")
 
                 concat_cmd = [
                     'ffmpeg', '-f', 'concat', '-safe', '0', '-i', concat_file,

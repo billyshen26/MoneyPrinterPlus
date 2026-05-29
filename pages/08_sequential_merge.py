@@ -151,6 +151,7 @@ with folder_container:
     video_folder = st.text_input(
         label="视频文件夹路径",
         placeholder="请输入视频文件夹路径",
+        value="D:\\sft\\workspace\\dajian\\downloads\\favorites\\红尘过客",
         key="sequential_video_folder",
         help="选择包含视频文件的文件夹"
     )
@@ -349,7 +350,7 @@ with cover_container:
         st.text_input(
             label="封面第一行文字",
             key="sequential_cover_line1",
-            value="盘点漂亮小姐姐",
+            value="盘点漂亮小美女",
             help="封面上的第一行文字"
         )
     with text_columns[1]:

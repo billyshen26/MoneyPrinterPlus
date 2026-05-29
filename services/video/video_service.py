@@ -330,7 +330,7 @@ def add_text_to_cover(input_image, output_image, line1=None, line2=None):
 
         # 获取用户输入的文字（默认）
         if line1 is None:
-            line1 = st.session_state.get("sequential_cover_line1", "盘点漂亮小姐姐")
+            line1 = st.session_state.get("sequential_cover_line1", "盘点漂亮小美女")
         if line2 is None:
             line2 = st.session_state.get("sequential_cover_line2", "你最喜欢哪一位")
 
@@ -935,3 +935,119 @@ class VideoService:
         if self.enable_background_music:
             add_background_music(merge_video, self.background_music, self.background_music_volume)
         return merge_video
+
+
+def create_black_background_with_text(width, height, text, output_image):
+    """创建黑色背景并在中间添加白色文字的图片"""
+    try:
+        from PIL import Image, ImageDraw, ImageFont
+
+        # 创建黑色背景
+        img = Image.new('RGB', (width, height), color=(0, 0, 0))
+        draw = ImageDraw.Draw(img)
+
+        # 获取字体，增大到120
+        font_size = 120
+        font = None
+        for fp in ['C:/Windows/Fonts/msyh.ttc', 'C:/Windows/Fonts/simhei.ttf', 'C:/Windows/Fonts/simsun.ttc']:
+            if os.path.exists(fp):
+                font = ImageFont.truetype(fp, font_size)
+                break
+        if font is None:
+            font = ImageFont.load_default()
+
+        # 白色文字
+        white_color = (255, 255, 255)
+
+        # 计算文字位置（居中）
+        bbox = draw.textbbox((0, 0), text, font=font)
+        text_width = bbox[2] - bbox[0]
+        text_height = bbox[3] - bbox[1]
+        x = (width - text_width) // 2
+        y = (height - text_height) // 2
+
+        # 绘制文字
+        draw.text((x, y), text, font=font, fill=white_color)
+
+        # 保存图片
+        img.save(output_image)
+        print(f"黑色背景文字图已创建: {output_image}")
+        return True
+    except Exception as e:
+        print(f"创建黑色背景文字图失败: {e}")
+        return False
+
+
+def create_sequential_intro_video(index, width, height, fps, output_video, output_dir):
+    """创建顺序介绍镜头视频（黑色背景 + 白色文字 + TTS语音）
+
+    Args:
+        index: 当前是第几位（从1开始）
+        width: 视频宽度
+        height: 视频高度
+        fps: 帧率
+        output_video: 输出视频路径
+        output_dir: 输出目录
+
+    Returns:
+        视频文件路径，失败返回None
+    """
+    # 生成文字
+    text = f"第{index}位"
+
+    # 创建黑色背景图片
+    temp_image = os.path.join(output_dir, f'intro_{index}_temp.jpg')
+    if not create_black_background_with_text(width, height, text, temp_image):
+        return None
+
+    # 生成TTS语音
+    audio_file = os.path.join(output_dir, f'intro_{index}_audio.mp3')
+    tts_audio = generate_intro_tts(text, audio_file)
+    if not tts_audio:
+        # 如果TTS失败，使用静音
+        audio_file = None
+
+    # 获取音频时长
+    if audio_file and os.path.exists(audio_file):
+        duration = get_audio_duration(audio_file)
+    else:
+        duration = 2  # 默认2秒
+
+    # 创建视频
+    if create_cover_video_with_audio(temp_image, duration, fps, width, height, output_video, audio_file):
+        print(f"顺序介绍镜头已创建: {output_video}")
+        # 清理临时文件
+        if os.path.exists(temp_image):
+            os.remove(temp_image)
+        return output_video
+    else:
+        print(f"创建顺序介绍镜头失败: {output_video}")
+        return None
+
+
+async def _generate_intro_tts_async(text, output_audio):
+    """异步生成介绍镜头语音"""
+    try:
+        import edge_tts
+        # 使用 XiaoyiNeural - 标准中文女声
+        voice = "zh-CN-XiaoyiNeural"
+        communicate = edge_tts.Communicate(text, voice=voice, rate="+0%", pitch="+0Hz")
+        await communicate.save(output_audio)
+        print(f"[介绍镜头语音] 使用声音: {voice}, 文字: {text}")
+        return True
+    except Exception as e:
+        print(f"生成介绍镜头语音失败: {e}")
+        return False
+
+
+def generate_intro_tts(text, output_audio):
+    """生成介绍镜头的TTS语音"""
+    print(f"[介绍镜头语音] 生成语音: {text}")
+    try:
+        asyncio.run(_generate_intro_tts_async(text, output_audio))
+        if os.path.exists(output_audio):
+            print(f"[介绍镜头语音] 已生成: {output_audio}")
+            return output_audio
+    except Exception as e:
+        print(f"[介绍镜头语音] 生成失败: {e}")
+    return None
