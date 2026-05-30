@@ -536,7 +536,7 @@ def create_cover_video(image_file, duration, fps, width, height, output_video):
 
 def generate_video_cover(video_list, output_dir, video_width, video_height, fps, timestamp=2, line1=None, line2=None):
     """
-    生成4宫格封面视频
+    生成4宫格封面视频（每个格子播放各自的视频片段）
 
     Args:
         video_list: 视频文件列表（需要>=4个）
@@ -552,8 +552,9 @@ def generate_video_cover(video_list, output_dir, video_width, video_height, fps,
         (cover_image_path, cover_video_path) or (None, None) if failed
     """
     import uuid
+    from tools.file_utils import generate_temp_filename
 
-    print(f"[DEBUG] generate_video_cover 被调用，视频列表: {video_list[:2]}...")  # 只打印前两个
+    print(f"[DEBUG] generate_video_cover 被调用，视频列表: {video_list[:2]}...")
 
     if len(video_list) < 4:
         print(f"视频数量不足4个，无法生成4宫格封面。当前有 {len(video_list)} 个视频")
@@ -563,61 +564,356 @@ def generate_video_cover(video_list, output_dir, video_width, video_height, fps,
     thumb_width = video_width // 2
     thumb_height = video_height // 2
 
-    # 临时目录存放帧图片
-    temp_dir = os.path.join(output_dir, 'cover_temp')
-    os.makedirs(temp_dir, exist_ok=True)
-
-    # 截取每个视频的帧
-    frame_files = []
-    for i, video_file in enumerate(video_list[:4]):
-        frame_path = os.path.join(temp_dir, f'frame_{i}_{uuid.uuid4().hex[:8]}.jpg')
-        print(f"[DEBUG] 截取第 {i+1} 个视频的帧...")
-        if extract_video_frame(video_file, timestamp, frame_path):
-            frame_files.append(frame_path)
-            print(f"[DEBUG] 帧截取成功: {frame_path}")
-
-    print(f"[DEBUG] 共截取 {len(frame_files)} 个帧")
-
-    if len(frame_files) < 4:
-        print("截取帧失败")
-        return None, None
-
-    # 创建4宫格封面图（带文字）
-    cover_image = os.path.join(output_dir, 'cover.jpg')
-    if create_4grid_cover(frame_files, cover_image, thumb_width, thumb_height, line1, line2):
-        print(f"4宫格封面已保存: {cover_image}")
-    else:
-        print("创建4宫格封面失败")
-        return None, None
-
-    # 清理帧图片
-    for f in frame_files:
-        if os.path.exists(f):
-            os.remove(f)
-
-    # 生成封面语音
+    # 生成封面语音，获取语音时长作为视频总时长
     cover_audio = None
+    audio_duration = 4  # 默认4秒
     if line1 or line2:
         cover_audio_file = os.path.join(output_dir, 'cover_audio.mp3')
         cover_audio = generate_cover_tts(line1, line2, cover_audio_file)
+        if cover_audio and os.path.exists(cover_audio):
+            audio_duration = get_audio_duration(cover_audio)
+            if not audio_duration or audio_duration < 1:
+                audio_duration = 4
+    print(f"[DEBUG] 封面语音时长: {audio_duration}秒")
 
-    # 创建封面视频（使用语音时长）
-    cover_video = os.path.join(output_dir, 'cover_video.mp4')
-    if create_cover_video_with_audio(cover_image, 2, fps, video_width, video_height, cover_video, cover_audio):
-        print(f"封面视频已创建: {cover_video}")
-    else:
-        print("创建封面视频失败")
+    # 创建临时目录
+    tmp_dir = os.path.join(output_dir, 'cover_tmp')
+    os.makedirs(tmp_dir, exist_ok=True)
+
+    # 创建带文字的覆盖层（用于叠加在视频上）
+    text_overlay_path = os.path.join(tmp_dir, 'text_overlay.png')
+    create_cover_text_overlay(video_width, video_height, line1, line2, text_overlay_path)
+
+    # 缩放4个视频到格子尺寸，并截取指定时长
+    scaled_videos = []
+    for i, video_file in enumerate(video_list[:4]):
+        scaled_video = os.path.join(tmp_dir, f'cover_scaled_{i}.mp4')
+
+        # 缩放视频到格子尺寸，并截取封面语音时长的片段
+        vf = f'scale={thumb_width}:{thumb_height}:force_original_aspect_ratio=increase,crop={thumb_width}:{thumb_height}'
+
+        command = [
+            'ffmpeg', '-y',
+            '-i', video_file,
+            '-vf', vf,
+            '-t', str(audio_duration),
+            '-r', str(fps),
+            '-c:v', 'libx264', '-preset', 'fast', '-crf', '23',
+            '-an',  # 移除音频
+            '-pix_fmt', 'yuv420p',
+            scaled_video
+        ]
+
+        print(f"[DEBUG] 缩放第 {i+1} 个视频...")
+        result = subprocess.run(command, capture_output=True, encoding='utf-8', errors='replace')
+        if result.returncode != 0 or not os.path.exists(scaled_video):
+            print(f"[DEBUG] 缩放第 {i+1} 个视频失败")
+            # 清理并返回失败
+            import shutil
+            if os.path.exists(tmp_dir):
+                shutil.rmtree(tmp_dir)
+            return None, None
+        scaled_videos.append(scaled_video)
+
+    # 创建4宫格视频（先不加文字）
+    cover_video_raw = os.path.join(tmp_dir, 'cover_raw.mp4')
+
+    # 使用 filter_complex 创建4宫格
+    filter_complex = f"""
+    [1:v][2:v]hstack=inputs=2[top];
+    [3:v][4:v]hstack=inputs=2[bottom];
+    [top][bottom]vstack=inputs=2[grid]
+    """
+
+    command = [
+        'ffmpeg', '-y',
+        '-i', scaled_videos[0],  # 占位符（会被 grid 替换）
+        '-i', scaled_videos[0],
+        '-i', scaled_videos[1],
+        '-i', scaled_videos[2],
+        '-i', scaled_videos[3],
+        '-filter_complex', filter_complex,
+        '-map', '[grid]',
+        '-t', str(audio_duration),
+        '-r', str(fps),
+        '-c:v', 'libx264', '-preset', 'fast', '-crf', '18',
+        '-pix_fmt', 'yuv420p',
+        cover_video_raw
+    ]
+
+    print(f"[DEBUG] 创建4宫格视频...")
+    result = subprocess.run(command, capture_output=True, encoding='utf-8', errors='replace')
+    if result.returncode != 0:
+        print(f"[DEBUG] 创建4宫格失败: {result.stderr[:300] if result.stderr else '未知错误'}")
+        import shutil
+        if os.path.exists(tmp_dir):
+            shutil.rmtree(tmp_dir)
         return None, None
 
-    # 清理临时目录（保留封面图和封面视频，它们已保存到output_dir）
+    # 添加文字 overlay
+    cover_video_no_audio = os.path.join(tmp_dir, 'cover_with_text.mp4')
+    cover_video = os.path.join(output_dir, 'cover_video.mp4')
+    
+    if os.path.exists(text_overlay_path):
+        # 使用 overlay 叠加文字
+        cmd = [
+            'ffmpeg', '-y',
+            '-i', cover_video_raw,
+            '-i', text_overlay_path,
+            '-filter_complex', '[0:v][1:v]overlay=0:0[out]',
+            '-map', '[out]',
+            '-c:v', 'libx264', '-preset', 'fast', '-crf', '18',
+            '-pix_fmt', 'yuv420p',
+            cover_video_no_audio
+        ]
+        print(f"[DEBUG] 添加文字 overlay...")
+        result = subprocess.run(cmd, capture_output=True, encoding='utf-8', errors='replace')
+        if result.returncode != 0:
+            print(f"[DEBUG] 添加文字失败: {result.stderr[:200] if result.stderr else '未知错误'}")
+            import shutil
+            shutil.copy(cover_video_raw, cover_video_no_audio)
+    else:
+        import shutil
+        shutil.copy(cover_video_raw, cover_video_no_audio)
+
+    # 添加封面语音
+    if cover_audio and os.path.exists(cover_audio):
+        cmd = [
+            'ffmpeg', '-y',
+            '-i', cover_video_no_audio,
+            '-i', cover_audio,
+            '-c:v', 'copy',
+            '-c:a', 'aac', '-b:a', '192k',
+            '-shortest',
+            cover_video
+        ]
+        result = subprocess.run(cmd, capture_output=True, encoding='utf-8', errors='replace')
+        if result.returncode != 0:
+            print(f"[DEBUG] 添加封面语音失败: {result.stderr[:200] if result.stderr else '未知错误'}")
+            import shutil
+            shutil.copy(cover_video_no_audio, cover_video)
+    else:
+        import shutil
+        shutil.copy(cover_video_no_audio, cover_video)
+
+    # 生成封面图片（用于预览）
+    cover_image = os.path.join(output_dir, 'cover.jpg')
+    temp_frame = os.path.join(tmp_dir, 'temp_frame.jpg')
+    if extract_video_frame(cover_video, 0.5, temp_frame):
+        from PIL import Image
+        img = Image.open(temp_frame)
+        img.save(cover_image)
+        if os.path.exists(temp_frame):
+            os.remove(temp_frame)
+        print(f"[DEBUG] 封面图片已保存: {cover_image}")
+
+    # 清理临时目录
     try:
         import shutil
-        if os.path.exists(temp_dir):
-            shutil.rmtree(temp_dir)
+        if os.path.exists(tmp_dir):
+            shutil.rmtree(tmp_dir)
     except:
         pass
 
+    print(f"[DEBUG] 4宫格封面视频已创建: {cover_video}")
     return cover_image, cover_video
+
+
+def create_cover_background_with_text(width, height, line1, line2, output_path):
+    """创建带文字的封面背景图"""
+    from PIL import Image, ImageDraw, ImageFont
+
+    # 创建黑色背景
+    img = Image.new('RGB', (width, height), color=(0, 0, 0))
+    draw = ImageDraw.Draw(img)
+
+    if not line1 and not line2:
+        img.save(output_path)
+        return
+
+    # 字体大小
+    font_size = height // 15
+    font = None
+    for fp in ['C:/Windows/Fonts/simhei.ttf', 'C:/Windows/Fonts/msyh.ttc', 'C:/Windows/Fonts/simsun.ttc']:
+        if os.path.exists(fp):
+            try:
+                font = ImageFont.truetype(fp, font_size)
+                break
+            except:
+                pass
+    if font is None:
+        font = ImageFont.load_default()
+
+    # 粉色文字
+    text_color = (255, 105, 180)  # HotPink
+    shadow_color = (0, 0, 0)
+
+    # 文字位置：底部居中
+    texts = []
+    if line1:
+        texts.append(line1)
+    if line2:
+        texts.append(line2)
+
+    if texts:
+        # 计算文字区域高度
+        line_height = font_size * 1.5
+        total_text_height = len(texts) * line_height
+        start_y = height - total_text_height - height // 20
+
+        for i, text in enumerate(texts):
+            bbox = draw.textbbox((0, 0), text, font=font)
+            text_w = bbox[2] - bbox[0]
+            text_h = bbox[3] - bbox[1]
+            x = (width - text_w) // 2
+            y = start_y + i * line_height
+
+            # 绘制阴影
+            draw.text((x + 3, y + 3), text, font=font, fill=shadow_color)
+            # 绘制文字
+            draw.text((x, y), text, font=font, fill=text_color)
+
+    img.save(output_path)
+    print(f"[DEBUG] 已创建带文字背景: {output_path}")
+
+
+def create_cover_text_overlay(width, height, line1, line2, output_path):
+    """创建文字覆盖层（透明背景，只有文字，用于叠加在视频上）"""
+    from PIL import Image, ImageDraw, ImageFont
+
+    # 创建透明背景
+    img = Image.new('RGBA', (width, height), color=(0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+
+    if not line1 and not line2:
+        img.save(output_path)
+        return
+
+    # 字体大小
+    font_size = height // 15
+    font = None
+    for fp in ['C:/Windows/Fonts/simhei.ttf', 'C:/Windows/Fonts/msyh.ttc', 'C:/Windows/Fonts/simsun.ttc']:
+        if os.path.exists(fp):
+            try:
+                font = ImageFont.truetype(fp, font_size)
+                break
+            except:
+                pass
+    if font is None:
+        font = ImageFont.load_default()
+
+    # 粉色文字
+    text_color = (255, 105, 180, 255)  # HotPink with alpha
+    shadow_color = (0, 0, 0, 200)
+
+    # 文字位置：底部居中
+    texts = []
+    if line1:
+        texts.append(line1)
+    if line2:
+        texts.append(line2)
+
+    if texts:
+        # 计算文字区域高度
+        line_height = font_size * 1.5
+        total_text_height = len(texts) * line_height
+        # 垂直居中：文字放在下半部分的中间
+        # 视频格子占据上半部分，文字放在下半部分的中间
+        grid_height = height // 2
+        text_start_y = grid_height + (height - grid_height - total_text_height) // 2
+
+        for i, text in enumerate(texts):
+            bbox = draw.textbbox((0, 0), text, font=font)
+            text_w = bbox[2] - bbox[0]
+            text_h = bbox[3] - bbox[1]
+            x = (width - text_w) // 2
+            y = text_start_y + i * line_height
+
+            # 绘制阴影
+            draw.text((x + 3, y + 3), text, font=font, fill=shadow_color)
+            # 绘制文字
+            draw.text((x, y), text, font=font, fill=text_color)
+
+    img.save(output_path)
+    print(f"[DEBUG] 已创建文字覆盖层: {output_path}")
+
+
+def add_text_to_video(input_video, output_video, line1=None, line2=None):
+    """在视频上添加文字水印（已废弃，使用 generate_video_cover 中的背景文字方式）"""
+    import shutil
+    shutil.copy(input_video, output_video)
+    return output_video
+
+
+def add_text_and_audio_to_video(input_video, audio_file, line1=None, line2=None, output_video=None):
+    """在视频上添加文字和音频（已废弃，使用 generate_video_cover 中的背景文字方式）"""
+    if output_video is None:
+        output_video = input_video.replace('.mp4', '_with_audio.mp4')
+
+    command = [
+        'ffmpeg', '-y',
+        '-i', input_video,
+        '-i', audio_file,
+        '-c:v', 'copy',
+        '-c:a', 'aac', '-b:a', '192k',
+        '-shortest',
+        output_video
+    ]
+
+    result = subprocess.run(command, capture_output=True, encoding='utf-8', errors='replace')
+    if result.returncode != 0:
+        print(f"[DEBUG] 添加音频失败: {result.stderr[:200]}")
+        return None
+
+    return output_video
+
+
+def add_text_using_pil(input_video, output_video, line1=None, line2=None):
+    """使用 PIL 添加文字（已废弃，使用 generate_video_cover 中的背景文字方式）"""
+    import shutil
+    shutil.copy(input_video, output_video)
+    return output_video
+
+
+def add_text_and_audio_to_video(input_video, audio_file, line1=None, line2=None, output_video=None):
+    """在视频上添加文字和音频"""
+    if output_video is None:
+        output_video = input_video.replace('.mp4', '_with_audio.mp4')
+
+    # 先添加文字（使用 PIL）
+    tmp_video = input_video.replace('.mp4', '_with_text.mp4')
+    add_text_using_pil(input_video, tmp_video, line1, line2)
+
+    if not os.path.exists(tmp_video):
+        print(f"[DEBUG] 添加文字失败，无法继续")
+        return None
+
+    # 再添加音频
+    command = [
+        'ffmpeg', '-y',
+        '-i', tmp_video,
+        '-i', audio_file,
+        '-c:v', 'copy',
+        '-c:a', 'aac', '-b:a', '192k',
+        '-shortest',
+        output_video
+    ]
+
+    print(f"[DEBUG] 添加音频: {audio_file}")
+    result = subprocess.run(command, capture_output=True, encoding='utf-8', errors='replace')
+
+    # 清理临时文件
+    if os.path.exists(tmp_video):
+        try:
+            os.remove(tmp_video)
+        except:
+            pass
+
+    if result.returncode != 0:
+        print(f"[DEBUG] 添加音频失败: {result.stderr[:200]}")
+        return None
+
+    return output_video
 
 
 class VideoMixService:

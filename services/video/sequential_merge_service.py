@@ -295,11 +295,6 @@ class SequentialMergeService:
                 # 将介绍镜头和视频合并 - 使用 filter_complex 方法
                 temp_with_intro = os.path.join(tmp_output_dir, f'video_with_intro_{i+1}.mp4')
 
-                # 获取两个视频的信息
-                intro_duration = get_video_duration(intro_video)
-                video_duration = get_video_duration(video_file)
-                total_duration = intro_duration + video_duration
-
                 # 使用 filter_complex 拼接
                 concat_cmd = [
                     'ffmpeg', '-y',
@@ -316,62 +311,71 @@ class SequentialMergeService:
                     temp_with_intro
                 ]
 
-                print(f"[SequentialMerge] 添加介绍镜头: 第{i+1}位 (使用filter_complex)")
-                print(f"[SequentialMerge] 命令: {' '.join(concat_cmd)}")
                 result = subprocess.run(concat_cmd, capture_output=True, encoding='utf-8', errors='replace')
-                print(f"[SequentialMerge] 返回码: {result.returncode}")
-                if result.returncode != 0:
-                    print(f"[SequentialMerge] 拼接失败: {result.stderr[:500]}")
-                if os.path.exists(temp_with_intro):
-                    actual_duration = get_video_duration(temp_with_intro)
-                    print(f"[SequentialMerge] 拼接成功，文件存在: {temp_with_intro}, 时长: {actual_duration:.2f}秒")
+                if result.returncode == 0 and os.path.exists(temp_with_intro):
                     video_with_intros.append(temp_with_intro)
                 else:
-                    print(f"[SequentialMerge] 添加介绍镜头失败，使用原视频")
+                    print(f"[SequentialMerge] 添加介绍镜头失败: {result.stderr[:200] if result.stderr else '未知错误'}")
                     video_with_intros.append(video_file)
             else:
-                print(f"[SequentialMerge] 介绍镜头不存在，跳过第{i+1}位")
                 video_with_intros.append(video_file)
 
-        print(f"[SequentialMerge] 顺序介绍镜头添加完成，共 {len(video_with_intros)} 个视频")
-        print(f"[SequentialMerge] 待拼接视频列表:")
-        for idx, v in enumerate(video_with_intros):
-            print(f"  [{idx+1}] {v}")
         return video_with_intros
 
     def _concatenate_simple(self, video_list):
-        """简单拼接视频"""
+        """简单拼接视频，保留所有视频的声音（依次播放，不混合）"""
         random_name = str(random_with_system_time())
         merge_video = os.path.join(video_output_dir, f"sequential-{random_name}.mp4")
-        temp_filelist_path = os.path.join(tmp_output_dir, f'seq_file_list_{random_name}.txt')
 
-        # 将路径转换为正斜杠格式
-        print(f"[SequentialMerge] 简单拼接文件列表:")
-        with open(temp_filelist_path, 'w', encoding='utf-8') as f:
-            for video_file in video_list:
-                video_file_posix = video_file.replace('\\', '/')
-                f.write(f"file '{video_file_posix}'\n")
-                print(f"  - {video_file_posix}")
+        # 获取视频时长
+        video_length_list = get_video_length_list(video_list)
+        if not video_length_list:
+            print("[SequentialMerge] 无法获取视频时长")
+            return None
 
-        # 使用高质量编码参数
+        total_duration = sum(video_length_list)
+        print(f"[SequentialMerge] 简单拼接 {len(video_list)} 个视频，总时长: {total_duration:.1f}秒")
+
+        # 使用 filter_complex 拼接，统一音频格式
+        n = len(video_list)
+        inputs = []
+        for video in video_list:
+            inputs.extend(['-i', video])
+
+        # 构建音频重采样和拼接滤镜
+        audio_filters = []
+        for i in range(n):
+            audio_filters.append(f'[{i}:a]aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo[a{i}]')
+        
+        audio_concat = ''.join([f'[a{i}]' for i in range(n)])
+        audio_filters.append(f'{audio_concat}concat=n={n}:v=0:a=1[aout]')
+
+        # 视频拼接
+        video_concat = ''.join([f'[{i}:v]' for i in range(n)])
+        video_concat += f'concat=n={n}:v=1:a=0[outv]'
+
+        filter_complex = ';'.join(audio_filters) + ';' + video_concat
+
         command = [
-            'ffmpeg', '-f', 'concat', '-safe', '0',
-            '-i', temp_filelist_path,
+            'ffmpeg', '-y',
+            *inputs,
+            '-filter_complex', filter_complex,
+            '-map', '[outv]',
+            '-map', '[aout]',
             '-c:v', 'libx264', '-preset', 'slow', '-crf', '18',
             '-c:a', 'aac', '-b:a', '192k',
+            '-ar', '44100',
+            '-ac', '2',
             '-r', str(self.fps),
             '-pix_fmt', 'yuv420p',
             '-movflags', '+faststart',
-            '-y', merge_video
+            merge_video
         ]
 
-        print(f"[SequentialMerge] 简单拼接命令: {' '.join(command)}")
+        print(f"[SequentialMerge] 拼接命令: ffmpeg filter_complex (依次播放音频)...")
         result = subprocess.run(command, capture_output=True, encoding='utf-8', errors='replace')
         if result.returncode != 0:
-            print(f"[SequentialMerge] 简单拼接失败: {result.stderr}")
-
-        if os.path.exists(temp_filelist_path):
-            os.remove(temp_filelist_path)
+            print(f"[SequentialMerge] 简单拼接失败: {result.stderr[:500]}")
 
         return merge_video if os.path.exists(merge_video) else None
 
@@ -462,29 +466,27 @@ class SequentialMergeService:
             if os.path.exists(merge_video):
                 os.rename(merge_video, temp_merge)
 
-                concat_file = os.path.join(tmp_output_dir, f'cover_concat_{random_name}.txt')
-                # 将路径转换为正斜杠格式
-                cover_video_posix = cover_video.replace('\\', '/')
-                temp_merge_posix = temp_merge.replace('\\', '/')
-                with open(concat_file, 'w', encoding='utf-8') as f:
-                    f.write(f"file '{cover_video_posix}'\n")
-                    f.write(f"file '{temp_merge_posix}'\n")
-
+                # 使用 filter_complex 拼接封面和视频，统一音频格式（依次播放）
                 concat_cmd = [
-                    'ffmpeg', '-f', 'concat', '-safe', '0', '-i', concat_file,
+                    'ffmpeg', '-y',
+                    '-i', cover_video,
+                    '-i', temp_merge,
+                    '-filter_complex', '[0:a]aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo[a0];[1:a]aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo[a1];[a0][a1]concat=n=2:v=0:a=1[aout];[0:v][1:v]concat=n=2:v=1:a=0[outv]',
+                    '-map', '[outv]',
+                    '-map', '[aout]',
                     '-c:v', 'libx264', '-preset', 'slow', '-crf', '18',
                     '-c:a', 'aac', '-b:a', '192k',
+                    '-ar', '44100',
+                    '-ac', '2',
                     '-r', str(self.fps),
                     '-pix_fmt', 'yuv420p',
                     '-movflags', '+faststart',
-                    '-y', merge_video
+                    merge_video
                 ]
 
-                print(f"[SequentialMerge] 封面拼接命令: {' '.join(concat_cmd)}")
+                print(f"[SequentialMerge] 封面拼接命令: ffmpeg filter_complex (依次播放音频)...")
                 subprocess.run(concat_cmd, capture_output=True, encoding='utf-8', errors='replace')
 
-                if os.path.exists(concat_file):
-                    os.remove(concat_file)
                 if os.path.exists(temp_merge):
                     os.remove(temp_merge)
 
