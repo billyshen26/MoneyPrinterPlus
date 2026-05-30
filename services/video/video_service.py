@@ -817,10 +817,8 @@ def create_cover_text_overlay(width, height, line1, line2, output_path):
         # 计算文字区域高度
         line_height = font_size * 1.5
         total_text_height = len(texts) * line_height
-        # 垂直居中：文字放在下半部分的中间
-        # 视频格子占据上半部分，文字放在下半部分的中间
-        grid_height = height // 2
-        text_start_y = grid_height + (height - grid_height - total_text_height) // 2
+        # 文字垂直居中：放在整个视频的中间位置
+        text_start_y = (height - total_text_height) // 2
 
         for i, text in enumerate(texts):
             bbox = draw.textbbox((0, 0), text, font=font)
