@@ -37,7 +37,8 @@ from config.config import shipinhao_site
 from tools.file_utils import read_head, read_file_with_extra_enter, read_file_start_with_secondline
 
 
-def shipinhao_publisher(driver, video_file, text_file):
+def shipinhao_publisher(driver, video_file, text_file, **kwargs):
+    title = kwargs.get('title')
 
     # driver.switch_to.window(driver.window_handles[0])
 
@@ -58,8 +59,8 @@ def shipinhao_publisher(driver, video_file, text_file):
     # 等待视频上传完毕
 
     # 设置标题
-    title = driver.find_element(By.XPATH, '//input[@placeholder="概括视频主要内容，字数建议6-16个字符"]')
-    title_text = read_head(text_file)
+    title_input = driver.find_element(By.XPATH, '//input[@placeholder="概括视频主要内容，字数建议6-16个字符"]')
+    title_text = title if title else ""
     use_common = st.session_state.get('video_publish_use_common_config')
     if use_common:
         common_title = st.session_state.get('video_publish_title_prefix')
@@ -70,11 +71,11 @@ def shipinhao_publisher(driver, video_file, text_file):
     # 替换中文标点符号
     title_text = re.sub(r'[。！？，：、；“’\-（）]', '', title_text)
 
-    # 标题有20字长度限制
-    if len(common_title + title_text) <= 20:
-        title.send_keys(common_title + title_text)
+    # 标题有20字长度限制（不使用前缀）
+    if len(title_text) <= 20:
+        title_input.send_keys(title_text)
     else:
-        title.send_keys(title_text)
+        title_input.send_keys(title_text[:20])
     time.sleep(2)
 
     # 设置内容
@@ -83,12 +84,12 @@ def shipinhao_publisher(driver, video_file, text_file):
     time.sleep(2)
     cmd_ctrl = Keys.COMMAND if sys.platform == 'darwin' else Keys.CONTROL
     # 将要粘贴的文本内容复制到剪贴板
-    content_text = read_file_start_with_secondline(text_file)
-    pyperclip.copy(content_text)
-    action_chains = webdriver.ActionChains(driver)
-    # 模拟实际的粘贴操作
-    action_chains.key_down(cmd_ctrl).send_keys('v').key_up(cmd_ctrl).perform()
-    time.sleep(2)
+    if text_file:
+        content_text = read_file_start_with_secondline(text_file)
+        pyperclip.copy(content_text)
+        action_chains = webdriver.ActionChains(driver)
+        action_chains.key_down(cmd_ctrl).send_keys('v').key_up(cmd_ctrl).perform()
+        time.sleep(2)
 
     # 设置tags
     if use_common:

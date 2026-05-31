@@ -34,7 +34,9 @@ from config.config import bilibili_site
 from tools.file_utils import read_head, read_file_with_extra_enter, read_file_start_with_secondline
 
 
-def bilibili_publisher(driver, video_file, text_file):
+def bilibili_publisher(driver, video_file, text_file, **kwargs):
+    title = kwargs.get('title')
+
     # 打开新标签页并切换到新标签页
     driver.switch_to.new_window('tab')
 
@@ -86,38 +88,51 @@ def bilibili_publisher(driver, video_file, text_file):
             'input[class*="title"]'
         ]
         
-        title = None
+        title_input = None
         for selector in title_selectors:
             try:
-                title = driver.find_element(By.CSS_SELECTOR, selector)
+                title_input = driver.find_element(By.CSS_SELECTOR, selector)
                 print(f"找到标题输入框: {selector}")
                 break
             except:
                 continue
         
-        if title:
-            title_text = read_head(text_file)
-            use_common = st.session_state.get('video_publish_use_common_config')
-            if use_common:
-                common_title = st.session_state.get('video_publish_title_prefix')
-            else:
-                common_title = st.session_state.get('video_publish_bilibili_title_prefix')
+        if title_input:
+            # 使用传入的标题
+            title_text = title if title else ""
+            print(f"[DEBUG] ========== 标题设置开始 ==========")
+            print(f"[DEBUG] 原始标题长度: {len(title_text)}")
+            print(f"[DEBUG] 原始标题repr: {repr(title_text)}")
+            print(f"[DEBUG] 原始标题中#数量: {title_text.count('#')}")
+            print(f"[DEBUG] 原始标题: [{title_text}]")
 
-            # 清空并输入
-            title.clear()
+            # 统计标题中的话题数量（保存原始话题数量）
+            original_topic_count = title_text.count('#')
+            print(f"[DEBUG] 话题数量: {original_topic_count}")
+
+            # 标题中可能包含 #话题，需要移除话题部分，只保留纯标题
+            pure_title = title_text.split('#')[0].strip() if '#' in title_text else title_text
+            print(f"[DEBUG] 纯标题: [{pure_title}]")
+
+            # 清空并输入（不使用前缀）
+            title_input.clear()
             time.sleep(0.5)
             
-            # 标题有80字长度限制
-            if len(common_title + title_text) <= 80:
-                title.send_keys(common_title + title_text)
+            # 标题有80字长度限制（不使用前缀）
+            print(f"[DEBUG] 最终标题长度: {len(pure_title)}")
+            if len(pure_title) <= 80:
+                title_input.send_keys(pure_title)
             else:
-                title.send_keys(title_text)
-            print(f"标题设置完成")
+                title_input.send_keys(pure_title[:80])
+            print(f"标题设置完成: [{pure_title}]")
+            print(f"[DEBUG] ========== 标题设置结束 ==========")
             time.sleep(2)
         else:
             print("未找到标题输入框")
     except Exception as e:
         print(f"标题设置失败: {e}")
+        import traceback
+        traceback.print_exc()
 
     # 设置标签
     try:
@@ -150,14 +165,25 @@ def bilibili_publisher(driver, video_file, text_file):
             else:
                 tags = st.session_state.get('video_publish_bilibili_tags')
             tags = tags.split()
+            print(f"[DEBUG] 配置的标签列表: {tags}")
+            print(f"[DEBUG] 配置的标签数量: {len(tags)}")
+            
+            # 统计标题中的话题数量（标题中如果有话题会被B站自动识别）
+            title_tags_count = len(title_text.split('#')) - 1 if '#' in title_text else 0
+            print(f"[DEBUG] 标题中的话题数量: {title_tags_count}")
+            # B站最多4个标签，减去标题中已占用的
+            max_config_tags = max(0, 4 - title_tags_count)
+            print(f"[DEBUG] 最大可添加配置标签数: {max_config_tags}")
             
             cmd_ctrl = Keys.COMMAND if sys.platform == 'darwin' else Keys.CONTROL
             i = 0
             for tag in tags:
-                if i >= 10:  # Bilibili 最多10个标签
+                if i >= max_config_tags:  # 最多添加剩余可用标签数量
+                    print(f"[DEBUG] 已达标签上限 {max_config_tags}，停止添加")
                     break
                 tag_clean = tag.strip()
                 if tag_clean:
+                    print(f"[DEBUG] 添加标签 {i+1}: {tag_clean}")
                     tags_input.send_keys(' ')
                     pyperclip.copy(tag_clean)
                     action = ActionChains(driver)
@@ -167,7 +193,7 @@ def bilibili_publisher(driver, video_file, text_file):
                     tags_input.send_keys(Keys.ENTER)
                     time.sleep(0.5)
                     i += 1
-            print(f"标签设置完成: {i} 个")
+            print(f"[DEBUG] 标签设置完成: 共添加 {i} 个")
         else:
             print("未找到标签输入框")
     except Exception as e:
@@ -193,8 +219,12 @@ def bilibili_publisher(driver, video_file, text_file):
                 continue
         
         if content:
-            content_text = read_file_start_with_secondline(text_file)
-            pyperclip.copy(content_text)
+            if text_file:
+                content_text = read_file_start_with_secondline(text_file)
+            else:
+                content_text = ""
+            if content_text:
+                pyperclip.copy(content_text)
             
             # 点击激活
             driver.execute_script("arguments[0].click();", content)

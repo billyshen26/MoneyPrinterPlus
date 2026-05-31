@@ -269,4 +269,17 @@ with video_generator:
 
 result_video_file = st.session_state.get("result_video_file")
 if result_video_file and os.path.exists(result_video_file):
+    st.success("视频生成成功！")
+    
+    # 显示文件路径
+    st.info(f"📁 文件路径：{result_video_file}")
+    
+    # 复制路径按钮
+    col1, col2 = st.columns([1, 4])
+    with col1:
+        if st.button("📋 复制路径", key="copy_path_btn"):
+            import pyperclip
+            pyperclip.copy(result_video_file)
+            st.toast("路径已复制到剪贴板！")
+    
     st.video(result_video_file)

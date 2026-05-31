@@ -48,7 +48,7 @@ all_sites = ['xiaohongshu',
              ]
 
 
-def publish_to_platform(platform, driver, video_file, text_file, usernames_file=None):
+def publish_to_platform(platform, driver, video_file, text_file, usernames_file=None, title=None):
     """
     发布到指定平台的封装函数
     """
@@ -56,6 +56,8 @@ def publish_to_platform(platform, driver, video_file, text_file, usernames_file=
         kwargs = {}
         if platform == 'douyin' and usernames_file:
             kwargs['usernames_file'] = usernames_file
+        if title:
+            kwargs['title'] = title
         globals()[platform + '_publisher'](driver, video_file, text_file, **kwargs)  # 动态调用对应平台的发布函数
     except Exception as e:
         print(platform, "got error")
@@ -69,28 +71,48 @@ def save_last_published_file_name(filename):
     write_to_file(filename, last_published_file_name)
 
 def publish_file():
+    from tools.file_utils import get_random_title_from_file
+
     driver = init_driver()
     video_file = get_must_session_option('video_publish_content_file', "请选择要发布的视频文件")
     text_file = get_must_session_option('video_publish_content_text', "请选择要发布的内容文件")
 
+    # 如果文本文件就是 title.txt，则不读取内容（避免把30个标题都当内容）
+    title_txt_path = os.path.abspath('final/title.txt')
+    selected_text_path = os.path.abspath(text_file) if text_file else ''
+    
+    # 从 title.txt 随机选择一个标题
+    title = get_random_title_from_file('final/title.txt')
+    print(f"[DEBUG] ========== 发布开始 ==========")
+    print(f"[DEBUG] 随机选择的标题: [{title}]")
+    print(f"[DEBUG] 标题长度: {len(title)}")
+    print(f"[DEBUG] 标题中#数量: {title.count('#')}")
+    
+    # 如果选择的是 title.txt，则不传 text_file（避免把全部标题当内容）
+    if selected_text_path == title_txt_path:
+        text_file = None
+        print(f"[DEBUG] 检测到使用 title.txt 作为文本文件，内容将只使用标题")
+    
     usernames_file = video_file.rsplit('.', 1)[0] + '.usernames'
     if not os.path.exists(usernames_file):
         usernames_file = None
 
     if st.session_state.get("video_publish_enable_douyin"):
-        publish_to_platform('douyin', driver, video_file, text_file, usernames_file)
+        publish_to_platform('douyin', driver, video_file, text_file, usernames_file, title)
 
     if st.session_state.get("video_publish_enable_kuaishou"):
-        publish_to_platform('kuaishou', driver, video_file, text_file)
+        publish_to_platform('kuaishou', driver, video_file, text_file, None, title)
 
     if st.session_state.get("video_publish_enable_xiaohongshu"):
-        publish_to_platform('xiaohongshu', driver, video_file, text_file)
+        publish_to_platform('xiaohongshu', driver, video_file, text_file, None, title)
 
     if st.session_state.get("video_publish_enable_shipinhao"):
-        publish_to_platform('shipinhao', driver, video_file, text_file)
+        publish_to_platform('shipinhao', driver, video_file, text_file, None, title)
         
     if st.session_state.get("video_publish_enable_bilibili"):
-        publish_to_platform('bilibili', driver, video_file, text_file)
+        publish_to_platform('bilibili', driver, video_file, text_file, None, title)
+    
+    print(f"[DEBUG] ========== 发布结束 ==========")
     
 
 def publish_all():

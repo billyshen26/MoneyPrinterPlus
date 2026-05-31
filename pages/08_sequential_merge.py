@@ -298,6 +298,7 @@ with transition_container:
         )
     with llm_columns[3]:
         watermark_position_options = {
+            "top_center": "顶部居中",
             "top_left": "左上角",
             "top_right": "右上角",
             "bottom_left": "左下角",
@@ -308,7 +309,7 @@ with transition_container:
             key="sequential_watermark_position",
             options=list(watermark_position_options.keys()),
             format_func=lambda x: watermark_position_options[x],
-            index=0,  # 默认左上角
+            index=0,  # 默认顶部居中
             help="水印在视频中的位置"
         )
 
@@ -381,6 +382,18 @@ with video_generator:
 result_video = st.session_state.get("sequential_result_video")
 if result_video and os.path.exists(result_video):
     st.success("视频生成成功！")
+    
+    # 显示文件路径
+    st.info(f"📁 文件路径：{result_video}")
+    
+    # 复制路径按钮
+    col1, col2 = st.columns([1, 4])
+    with col1:
+        if st.button("📋 复制路径", key="copy_path_btn"):
+            import pyperclip
+            pyperclip.copy(result_video)
+            st.toast("路径已复制到剪贴板！")
+    
     st.video(result_video)
 
     # 提供下载链接

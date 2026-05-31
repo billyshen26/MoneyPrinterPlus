@@ -37,7 +37,12 @@ from config.config import kuaishou_site
 from tools.file_utils import read_file_with_extra_enter
 
 
-def kuaishou_publisher(driver, video_file, text_file):
+def kuaishou_publisher(driver, video_file, text_file, **kwargs):
+    title = kwargs.get('title')
+
+    print(f"[DEBUG] ========== 快手发布开始 ==========")
+    print(f"[DEBUG] 传入的标题: [{title}]")
+    print(f"[DEBUG] 标题中#数量: {title.count('#') if title else 0}")
 
     # driver.switch_to.window(driver.window_handles[0])
 
@@ -58,7 +63,7 @@ def kuaishou_publisher(driver, video_file, text_file):
     # 等待视频上传完毕 - 快手新页面使用 id="work-description-edit"
     wait.until(EC.presence_of_element_located((By.XPATH, '//div[@id="work-description-edit"]')))
 
-    # 设置标题
+    # 设置标题（快手没有单独的标题输入框，标题包含在内容中）
     use_common = st.session_state.get('video_publish_use_common_config')
     if use_common:
         common_title = st.session_state.get('video_publish_title_prefix')
@@ -70,34 +75,81 @@ def kuaishou_publisher(driver, video_file, text_file):
     content.click()
     time.sleep(2)
     cmd_ctrl = Keys.COMMAND if sys.platform == 'darwin' else Keys.CONTROL
-    # 将要粘贴的文本内容复制到剪贴板
-    content_text = read_file_with_extra_enter(text_file)
-    content_text = content_text[:450]
-    pyperclip.copy(common_title + content_text)
+    
+    # 使用完整的标题（包括话题）
+    full_title = title if title else ""
+    print(f"[DEBUG] 输入的标题: [{full_title}]")
+    
+    # 如果有文本文件，读取内容；否则只使用标题
+    if text_file:
+        content_text = read_file_with_extra_enter(text_file)
+        content_text = content_text[:450]
+        full_text = full_title + '\n\n' + content_text
+    else:
+        full_text = full_title
+    
+    print(f"[DEBUG] 粘贴内容中#数量: {full_text.count('#')}")
+    pyperclip.copy(full_text)
     action_chains = webdriver.ActionChains(driver)
-    # 模拟实际的粘贴操作
     action_chains.key_down(cmd_ctrl).send_keys('v').key_up(cmd_ctrl).perform()
     time.sleep(2)
-
-    # 设置tags
-    if use_common:
-        tags = st.session_state.get('video_publish_tags')
-    else:
-        tags = st.session_state.get('video_publish_kuaishou_tags')
-    i =0
-    tags = tags.split()
-    for tag in tags:
-        # 快手只接受三个标签
-        if i == 3:
-            break
-        content.send_keys(' ')
-        content.send_keys(tag)
-        time.sleep(2)
-        content.send_keys(Keys.ENTER)
+    
+    # 点击"智能话题"按钮，让快手推荐话题
+    try:
+        print(f"[DEBUG] 点击智能话题按钮...")
+        # 先滚动到合适位置
+        driver.execute_script("window.scrollTo(0, 200);")
         time.sleep(1)
-        content.send_keys(' ')
-        time.sleep(2)
-        i=i+1
+        
+        ai_topic_button = driver.find_element(By.XPATH, '//div[contains(@class, "_ai-button-icon-topic")]')
+        # 使用 JavaScript 点击避免被遮挡
+        driver.execute_script("arguments[0].click();", ai_topic_button)
+        time.sleep(3)  # 等待推荐话题出现
+        
+        # 查找推荐的话题元素
+        topic_items = driver.find_elements(By.CSS_SELECTOR, 'div._ai-topics-item_1gvw3_170')
+        print(f"[DEBUG] 找到 {len(topic_items)} 个推荐话题")
+        
+        # 选中前4个推荐话题
+        i = 0
+        for topic_item in topic_items[:4]:
+            try:
+                # 使用 JavaScript 点击
+                driver.execute_script("arguments[0].click();", topic_item)
+                time.sleep(0.5)
+                i += 1
+                print(f"[DEBUG] 已选中话题 {i}")
+            except Exception as e:
+                print(f"[DEBUG] 选中话题 {i+1} 失败: {e}")
+        
+        print(f"[DEBUG] 成功选中 {i} 个推荐话题")
+    except Exception as e:
+        print(f"[DEBUG] 智能话题点击失败: {e}")
+
+    # 跳过手动设置标签（改用智能话题推荐）
+    # if use_common:
+    #     tags = st.session_state.get('video_publish_tags')
+    # else:
+    #     tags = st.session_state.get('video_publish_kuaishou_tags')
+    # tags = tags.split()
+    # print(f"[DEBUG] 配置的标签: {tags}")
+    
+    # i =0
+    # for tag in tags:
+    #     # 快手只接受三个标签
+    #     if i == 3:
+    #         break
+    #     print(f"[DEBUG] 添加标签 {i+1}: [{tag}]")
+    #     content.send_keys(' ')
+    #     content.send_keys(tag)
+    #     time.sleep(2)
+    #     content.send_keys(Keys.ENTER)
+    #     time.sleep(1)
+    #     content.send_keys(' ')
+    #     time.sleep(2)
+    #     i=i+1
+    # print(f"[DEBUG] 标签设置完成，共 {i} 个")
+    print(f"[DEBUG] ========== 快手发布结束 ==========")
 
     # 设置合集（新版页面可能没有此功能）
     try:

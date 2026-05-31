@@ -56,7 +56,9 @@ def _format_comment(template, usernames):
     return template.format(*usernames)
 
 
-def douyin_publisher(driver, video_file, text_file, usernames_file=None):
+def douyin_publisher(driver, video_file, text_file, **kwargs):
+    usernames_file = kwargs.get('usernames_file')
+    title = kwargs.get('title')
 
     # driver.switch_to.window(driver.window_handles[0])
 
@@ -79,19 +81,22 @@ def douyin_publisher(driver, video_file, text_file, usernames_file=None):
     # wait.until(EC.presence_of_element_located((By.CLASS_NAME, 'semi-input semi-input-default')))
 
     # 设置标题
-    title = driver.find_element(By.XPATH, '//input[@class="semi-input semi-input-default"]')
-    title_text = read_head(text_file)
+    title_input = driver.find_element(By.XPATH, '//input[@class="semi-input semi-input-default"]')
+    title_text = title if title else ""
     use_common = st.session_state.get('video_publish_use_common_config')
     if use_common:
         common_title = st.session_state.get('video_publish_title_prefix')
     else:
         common_title = st.session_state.get('video_publish_douyin_title_prefix')
 
-    # 标题有30字长度限制
-    if len(common_title + title_text) <= 30:
-        title.send_keys(common_title + title_text)
+    # 标题中可能包含 #话题，需要移除话题部分
+    pure_title = title_text.split('#')[0].strip() if '#' in title_text else title_text
+
+    # 标题有30字长度限制（不使用前缀，直接用纯标题）
+    if len(pure_title) <= 30:
+        title_input.send_keys(pure_title)
     else:
-        title.send_keys(title_text)
+        title_input.send_keys(pure_title[:30])
     time.sleep(2)
 
     # 设置内容
@@ -99,13 +104,27 @@ def douyin_publisher(driver, video_file, text_file, usernames_file=None):
     content.click()
     time.sleep(2)
     cmd_ctrl = Keys.COMMAND if sys.platform == 'darwin' else Keys.CONTROL
-    # 将要粘贴的文本内容复制到剪贴板
-    content_text = read_file_start_with_secondline(text_file)
-    pyperclip.copy(content_text)
-    action_chains = webdriver.ActionChains(driver)
-    # 模拟实际的粘贴操作
-    action_chains.key_down(cmd_ctrl).send_keys('v').key_up(cmd_ctrl).perform()
-    time.sleep(2)
+    
+    # 如果有文本文件，读取内容；否则只使用标题中的话题
+    if text_file:
+        content_text = read_file_start_with_secondline(text_file)
+        # 如果标题中有话题，把话题也加到内容里
+        if '#' in title_text:
+            topics = '#'.join(title_text.split('#')[1:]).strip()
+            if topics:
+                content_text = content_text + '\n' + topics
+    else:
+        # 没有文本文件时，使用标题中的话题作为内容
+        if '#' in title_text:
+            content_text = '#'.join(title_text.split('#')[1:]).strip()
+        else:
+            content_text = ""
+    
+    if content_text:
+        pyperclip.copy(content_text)
+        action_chains = webdriver.ActionChains(driver)
+        action_chains.key_down(cmd_ctrl).send_keys('v').key_up(cmd_ctrl).perform()
+        time.sleep(2)
 
     # 设置tags
     if use_common:

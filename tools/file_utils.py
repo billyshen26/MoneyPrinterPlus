@@ -146,6 +146,23 @@ def random_line_from_text_file(text_file):
         return line.strip()
 
 
+def get_random_title_from_file(title_file='final/title.txt'):
+    """从标题文件中随机选择一个标题"""
+    if os.path.exists(title_file):
+        try:
+            with open(title_file, 'r', encoding='utf-8') as f:
+                lines = [line.strip() for line in f if line.strip()]
+                if lines:
+                    # 随机选择一个标题，并移除所有换行符
+                    title = random.choice(lines)
+                    # 移除标题中可能的换行符
+                    title = title.replace('\n', '').replace('\r', '')
+                    return title
+        except Exception as e:
+            print(f"读取标题文件失败: {e}")
+    return ""
+
+
 def read_head(file):
     if os.path.exists(file):
         with open(file, 'r', encoding='UTF-8') as file:

@@ -73,11 +73,11 @@ def extract_username_from_filename(filename):
     return None
 
 
-def render_username_image(username, output_path, prefix="出镜小姐姐：", width=500, font_size=36):
+def render_username_image(username, output_path, prefix="出镜小姐姐：", width=500, font_size=48):
     """用 Pillow 把用户名渲染成白字透明底图片，支持前缀"""
     try:
         full_text = f"{prefix}{username}" if prefix else username
-        img = Image.new('RGBA', (width, font_size + 20), color=(0, 0, 0, 0))
+        img = Image.new('RGBA', (width, font_size + 24), color=(0, 0, 0, 0))
         draw = ImageDraw.Draw(img)
         font = None
         for fp in ['C:/Windows/Fonts/msyh.ttc', 'C:/Windows/Fonts/simhei.ttf', 'C:/Windows/Fonts/simsun.ttc']:
@@ -91,7 +91,7 @@ def render_username_image(username, output_path, prefix="出镜小姐姐：", wi
         text_h = bbox[3] - bbox[1]
         x = 10
         y = 8
-        draw.text((x, y), full_text, fill=(255, 255, 255), font=font, stroke_width=2, stroke_fill=(0, 0, 0))
+        draw.text((x, y), full_text, fill=(255, 255, 255), font=font, stroke_width=3, stroke_fill=(0, 0, 0))
         img.save(output_path)
         return True
     except Exception as e:
@@ -178,12 +178,14 @@ class SequentialMergeService:
             # 构建完整的滤镜链
             if username:
                 username_img = generate_temp_filename(output_name, "_username.png", work_output_dir)
-                if render_username_image(username, username_img, prefix="出镜小姐姐：", width=500, font_size=36):
+                if render_username_image(username, username_img, prefix="出镜小姐姐：", width=500, font_size=48):
                     # 根据水印位置计算 overlay 坐标
                     if self.watermark_position == "top_left":
-                        overlay_pos = "10:10"
+                        overlay_pos = "10:80"
                     elif self.watermark_position == "top_right":
-                        overlay_pos = "(W-w-10):10"
+                        overlay_pos = "(W-w-10):80"
+                    elif self.watermark_position == "top_center":
+                        overlay_pos = "(W-w)/2:80"
                     elif self.watermark_position == "bottom_left":
                         overlay_pos = "10:(H-h-10)"
                     else:  # bottom_right

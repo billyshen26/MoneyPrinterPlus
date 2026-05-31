@@ -36,7 +36,8 @@ from config.config import xiaohongshu_site
 from tools.file_utils import read_head, read_file_with_extra_enter, read_file_start_with_secondline
 
 
-def xiaohongshu_publisher(driver, video_file, text_file):
+def xiaohongshu_publisher(driver, video_file, text_file, **kwargs):
+    title = kwargs.get('title')
 
     # 打开新标签页并切换到新标签页
     driver.switch_to.new_window('tab')
@@ -78,24 +79,27 @@ def xiaohongshu_publisher(driver, video_file, text_file):
         wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, '.d-text')))
         time.sleep(1)
         
-        title = driver.find_element(By.CSS_SELECTOR, '.d-text')
-        title_text = read_head(text_file)
+        title_input = driver.find_element(By.CSS_SELECTOR, '.d-text')
+        title_text = title if title else ""
         use_common = st.session_state.get('video_publish_use_common_config')
         if use_common:
             common_title = st.session_state.get('video_publish_title_prefix')
         else:
             common_title = st.session_state.get('video_publish_xiaohongshu_title_prefix')
         
+        # 标题中可能包含 #话题，需要移除话题部分
+        pure_title = title_text.split('#')[0].strip() if '#' in title_text else title_text
+        
         # 先清空标题
-        title.clear()
+        title_input.clear()
         time.sleep(0.5)
         
-        # 标题有20字长度限制
-        if len(common_title + title_text) <= 20:
-            title.send_keys(common_title + title_text)
+        # 标题有20字长度限制（不使用前缀）
+        if len(pure_title) <= 20:
+            title_input.send_keys(pure_title)
         else:
-            title.send_keys(title_text)
-        print(f"标题设置完成: {common_title + title_text if len(common_title + title_text) <= 20 else title_text}")
+            title_input.send_keys(pure_title[:20])
+        print(f"标题设置完成: {pure_title}")
         time.sleep(2)
     except Exception as e:
         print(f"标题设置失败: {e}")
@@ -107,7 +111,10 @@ def xiaohongshu_publisher(driver, video_file, text_file):
         time.sleep(1)
 
         # 读取内容
-        content_text = read_file_start_with_secondline(text_file)
+        if text_file:
+            content_text = read_file_start_with_secondline(text_file)
+        else:
+            content_text = ""
         use_common = st.session_state.get('video_publish_use_common_config')
         if use_common:
             tags = st.session_state.get('video_publish_tags')

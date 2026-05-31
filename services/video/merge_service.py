@@ -64,10 +64,10 @@ def extract_username_from_filename(filename):
     return None
 
 
-def render_username_image(username, output_path, width=300, font_size=28):
+def render_username_image(username, output_path, width=500, font_size=40):
     """用 Pillow 把用户名渲染成白字透明底图片"""
     try:
-        img = Image.new('RGBA', (width, font_size + 20), color=(0, 0, 0, 0))
+        img = Image.new('RGBA', (width, font_size + 24), color=(0, 0, 0, 0))
         draw = ImageDraw.Draw(img)
         font = None
         for fp in ['C:/Windows/Fonts/msyh.ttc', 'C:/Windows/Fonts/simhei.ttf', 'C:/Windows/Fonts/simsun.ttc']:
@@ -81,7 +81,7 @@ def render_username_image(username, output_path, width=300, font_size=28):
         text_h = bbox[3] - bbox[1]
         x = (width - text_w) // 2
         y = 4
-        draw.text((x, y), username, fill=(255, 255, 255), font=font, stroke_width=2, stroke_fill=(0, 0, 0))
+        draw.text((x, y), username, fill=(255, 255, 255), font=font, stroke_width=3, stroke_fill=(0, 0, 0))
         img.save(output_path)
         return True
     except Exception as e:
@@ -403,8 +403,8 @@ class VideoMergeService:
                 # 如果需要显示用户名，添加水印
                 if username:
                     username_img = generate_temp_filename(output_name, "_username.png", work_output_dir)
-                    if render_username_image(username, username_img, width=300, font_size=28):
-                        vf = f"{base_scale},format=yuv420p[out];[out][1:v]overlay=(W-w)/2:10[out]"
+                    if render_username_image(username, username_img, width=500, font_size=40):
+                        vf = f"{base_scale},format=yuv420p[out];[out][1:v]overlay=(W-w)/2:80[out]"
                         command = [
                             'ffmpeg',
                             '-i', media_file,
