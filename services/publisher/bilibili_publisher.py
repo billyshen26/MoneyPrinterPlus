@@ -194,10 +194,174 @@ def bilibili_publisher(driver, video_file, text_file, **kwargs):
                     time.sleep(0.5)
                     i += 1
             print(f"[DEBUG] 标签设置完成: 共添加 {i} 个")
+            
+            # 添加推荐标签
+            print("尝试添加推荐标签...")
+            try:
+                # 等待推荐标签出现
+                time.sleep(2)
+                
+                # 查找推荐标签列表 - 根据HTML结构
+                # 推荐标签在 class="tag-list" 下，每个标签是 class="hot-tag-container" 下的 "hot-tag-item"
+                recommend_selectors = [
+                    '.tag-list .hot-tag-item',
+                    '.tag-wrp .hot-tag-item',
+                    '[class*="tag-list"] [class*="hot-tag"]',
+                    '.tag-list .hot-tag-container .hot-tag-item span'
+                ]
+                
+                for selector in recommend_selectors:
+                    try:
+                        recommend_tags = driver.find_elements(By.CSS_SELECTOR, selector)
+                        if recommend_tags and len(recommend_tags) > 0:
+                            print(f"找到推荐标签: {len(recommend_tags)} 个")
+                            
+                            # 点击前几个推荐标签
+                            click_count = 0
+                            max_tags = min(3, max_config_tags) if max_config_tags > 0 else 1
+                            for tag_elem in recommend_tags[:3]:
+                                if click_count >= max_tags:
+                                    break
+                                try:
+                                    tag_text = tag_elem.text.strip()
+                                    if tag_text:
+                                        tag_elem.click()
+                                        print(f"[DEBUG] 点击推荐标签: {tag_text}")
+                                        click_count += 1
+                                        time.sleep(0.5)
+                                except:
+                                    # 可能需要点击 span 元素
+                                    try:
+                                        span = tag_elem.find_element(By.CSS_SELECTOR, 'span')
+                                        tag_text = span.text.strip()
+                                        tag_elem.click()
+                                        print(f"[DEBUG] 点击推荐标签: {tag_text}")
+                                        click_count += 1
+                                        time.sleep(0.5)
+                                    except:
+                                        continue
+                            break
+                    except:
+                        continue
+                        
+                # 尝试添加话题
+                print("尝试添加话题...")
+                topic_selectors = [
+                    '.tag-topic-list .hot-tag-item',
+                    '.tag-topic-wrp .hot-tag-item'
+                ]
+                
+                for selector in topic_selectors:
+                    try:
+                        topics = driver.find_elements(By.CSS_SELECTOR, selector)
+                        if topics and len(topics) > 0:
+                            print(f"找到话题: {len(topics)} 个")
+                            # 点击第一个话题
+                            try:
+                                topic_text = topics[0].text.strip()
+                                topics[0].click()
+                                print(f"[DEBUG] 点击话题: {topic_text}")
+                            except:
+                                pass
+                            break
+                    except:
+                        continue
+                        
+            except Exception as e:
+                print(f"添加推荐标签失败: {e}")
+                
         else:
             print("未找到标签输入框")
     except Exception as e:
         print(f"标签设置失败: {e}")
+    
+    # 设置创作声明
+    try:
+        print("尝试设置创作声明...")
+        time.sleep(1)
+        
+        # 创作声明是一个下拉选择框
+        # 找到下拉选择器并点击打开
+        declaration_selectors = [
+            '.bcc-select-input-wrap',
+            '.bcc-select',
+            '[class*="creation-statement"] .bcc-select'
+        ]
+        
+        dropdown = None
+        for selector in declaration_selectors:
+            try:
+                dropdown = driver.find_element(By.CSS_SELECTOR, selector)
+                print(f"找到创作声明下拉框: {selector}")
+                dropdown.click()
+                time.sleep(1)
+                break
+            except:
+                continue
+        
+        if not dropdown:
+            # 备选方案：直接执行 JavaScript 打开下拉框
+            driver.execute_script("""
+                var select = document.querySelector('.bcc-select');
+                if (select) {
+                    var input = select.querySelector('.bcc-select-input-wrap');
+                    if (input) input.click();
+                }
+            """)
+            time.sleep(1)
+        
+        # 等待下拉选项出现
+        time.sleep(1)
+        
+        # 选择第一个选项"内容无需标注"作为默认值
+        # 根据HTML结构: .bcc-select-option-list 下的 li.bcc-option
+        option_selectors = [
+            'li.bcc-option:first-child',
+            '.bcc-select-option-list li:first-child',
+            '.bcc-select-option-list .bcc-option:first-child'
+        ]
+        
+        option_found = False
+        for selector in option_selectors:
+            try:
+                # 先确保下拉列表可见
+                driver.execute_script("""
+                    var list = document.querySelector('.bcc-select-list-wrap');
+                    if (list) list.style.display = 'block';
+                """)
+                time.sleep(0.5)
+                
+                option = driver.find_element(By.CSS_SELECTOR, selector)
+                option_text = option.text.strip()
+                print(f"找到创作声明选项: {option_text}")
+                
+                if "内容无需标注" in option_text or option.is_displayed():
+                    option.click()
+                    print("[DEBUG] 已选择创作声明: 内容无需标注")
+                    option_found = True
+                    break
+            except:
+                continue
+        
+        if not option_found:
+            # 备选方案：通过 JavaScript 直接选择
+            driver.execute_script("""
+                var list = document.querySelector('.bcc-select-list-wrap');
+                if (list) {
+                    list.style.display = 'block';
+                    var options = list.querySelectorAll('.bcc-option');
+                    if (options && options.length > 0) {
+                        // 选择第一个选项"内容无需标注"
+                        options[0].click();
+                        console.log('已通过JS选择第一个选项');
+                    }
+                }
+            """)
+            time.sleep(1)
+            print("[DEBUG] 尝试通过JS选择创作声明")
+                
+    except Exception as e:
+        print(f"创作声明设置失败: {e}")
 
     # 设置简介/内容
     try:

@@ -52,10 +52,31 @@ def shipinhao_publisher(driver, video_file, text_file, **kwargs):
     # 设置等待
     wait = WebDriverWait(driver, 10)
 
-    # 上传视频按钮
-    file_input = driver.find_element(By.XPATH, '//input[@type="file"]')
-    file_input.send_keys(video_file)
-    time.sleep(10)  # 等待
+    # 上传视频按钮 - 尝试多种选择器
+    file_input = None
+    file_selectors = [
+        '//input[@type="file"]',
+        '//input[@accept="video/*"]',
+        '//input[contains(@accept, "video")]',
+        '//input[contains(@class, "upload")]',
+        '//div[contains(@class, "upload")]//input'
+    ]
+    
+    for selector in file_selectors:
+        try:
+            file_input = driver.find_element(By.XPATH, selector)
+            print(f"找到上传输入框: {selector}")
+            break
+        except:
+            continue
+    
+    if file_input:
+        file_input.send_keys(video_file)
+        print("视频上传中，请等待...")
+        time.sleep(10)  # 等待视频上传
+    else:
+        print("[错误] 未找到视频上传输入框，请手动上传")
+        return
     # 等待视频上传完毕
 
     # 设置标题

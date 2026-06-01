@@ -24,6 +24,7 @@
 import os
 import random
 import re
+import shutil
 import subprocess
 import uuid
 
@@ -440,10 +441,11 @@ class SequentialMergeService:
         cover_image = None
         cover_video = None
 
+        # 封面生成在tmp目录，避免final目录出现中间文件
         if self.cover_type == "4grid" and len(video_list) >= 4:
             cover_image, cover_video = generate_video_cover(
                 video_list[:4],
-                video_output_dir,
+                tmp_output_dir,
                 self.target_width,
                 self.target_height,
                 self.fps,
@@ -454,7 +456,7 @@ class SequentialMergeService:
         elif self.cover_type == "9grid" and len(video_list) >= 9:
             cover_image, cover_video = generate_video_cover(
                 video_list[:9],
-                video_output_dir,
+                tmp_output_dir,
                 self.target_width,
                 self.target_height,
                 self.fps,
@@ -464,9 +466,10 @@ class SequentialMergeService:
             )
 
         if cover_video and os.path.exists(cover_video):
-            temp_merge = os.path.join(tmp_output_dir, merge_video.replace(video_output_dir, '').lstrip(os.sep))
+            # 封面视频在tmp目录，需要将合并视频移到tmp，拼接后再移回final目录
+            temp_merge = os.path.join(tmp_output_dir, 'temp_merged_video.mp4')
             if os.path.exists(merge_video):
-                os.rename(merge_video, temp_merge)
+                shutil.move(merge_video, temp_merge)
 
                 # 使用 filter_complex 拼接封面和视频，统一音频格式（依次播放）
                 concat_cmd = [
@@ -489,9 +492,14 @@ class SequentialMergeService:
                 print(f"[SequentialMerge] 封面拼接命令: ffmpeg filter_complex (依次播放音频)...")
                 subprocess.run(concat_cmd, capture_output=True, encoding='utf-8', errors='replace')
 
+                # 清理临时文件
                 if os.path.exists(temp_merge):
                     os.remove(temp_merge)
+                if os.path.exists(cover_video):
+                    os.remove(cover_video)
+                if cover_image and os.path.exists(cover_image):
+                    os.remove(cover_image)
 
                 if cover_image:
-                    st.session_state["sequential_generated_cover_image"] = cover_image
+                    st.session_state["sequential_generated_cover_image"] = None  # 封面已删除
                 print(f"[SequentialMerge] 封面已添加到视频")

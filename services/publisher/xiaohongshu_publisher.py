@@ -31,8 +31,10 @@ import sys
 from selenium.webdriver import Keys
 
 import time
-
+from selenium.webdriver.common.by import By
 from config.config import xiaohongshu_site
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 from tools.file_utils import read_head, read_file_with_extra_enter, read_file_start_with_secondline
 
 
@@ -170,34 +172,11 @@ def xiaohongshu_publisher(driver, video_file, text_file, **kwargs):
         import traceback
         traceback.print_exc()
 
-    # 发布 - 通过 shadow DOM
-    auto_publish = st.session_state.get('video_publish_auto_publish')
-    if auto_publish:
-        print("开始自动发布...")
-        time.sleep(2)
-        
-        # 先滚动到页面底部，确保发布按钮可见
-        driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-        time.sleep(1)
-        
-        # 尝试点击发布按钮
-        driver.execute_script("""
-            var btn = document.querySelector('xhs-publish-btn');
-            if (btn && btn.shadowRoot) {
-                var publishBtn = btn.shadowRoot.querySelector('.bg-red');
-                if (publishBtn) {
-                    publishBtn.click();
-                    console.log('发布按钮已点击');
-                } else {
-                    console.log('未找到发布按钮 .bg-red');
-                    // 打印 shadowRoot 内容
-                    console.log('Shadow root children:', btn.shadowRoot.innerHTML);
-                }
-            } else {
-                console.log('未找到 xhs-publish-btn');
-            }
-        """)
-        print("发布操作已完成，请检查浏览器")
+    # 小红书不支持自动发布，需要手动点击发布按钮
+    # 滚动到页面底部，确保发布按钮可见
+    driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+    time.sleep(1)
+    print("小红书发布准备完成，请在浏览器中手动点击发布按钮")
 
 
 

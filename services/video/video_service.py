@@ -540,7 +540,7 @@ def generate_video_cover(video_list, output_dir, video_width, video_height, fps,
 
     Args:
         video_list: 视频文件列表（需要>=4个）
-        output_dir: 输出目录
+        output_dir: 输出目录（仅用于最终文件）
         video_width: 视频宽度
         video_height: 视频高度
         fps: 帧率
@@ -576,7 +576,7 @@ def generate_video_cover(video_list, output_dir, video_width, video_height, fps,
                 audio_duration = 4
     print(f"[DEBUG] 封面语音时长: {audio_duration}秒")
 
-    # 创建临时目录
+    # 创建临时目录（使用output_dir的tmp子目录）
     tmp_dir = os.path.join(output_dir, 'cover_tmp')
     os.makedirs(tmp_dir, exist_ok=True)
 
@@ -652,6 +652,7 @@ def generate_video_cover(video_list, output_dir, video_width, video_height, fps,
 
     # 添加文字 overlay
     cover_video_no_audio = os.path.join(tmp_dir, 'cover_with_text.mp4')
+    # 最终的封面视频放在output_dir
     cover_video = os.path.join(output_dir, 'cover_video.mp4')
     
     if os.path.exists(text_overlay_path):
@@ -696,8 +697,8 @@ def generate_video_cover(video_list, output_dir, video_width, video_height, fps,
         import shutil
         shutil.copy(cover_video_no_audio, cover_video)
 
-    # 生成封面图片（用于预览）
-    cover_image = os.path.join(output_dir, 'cover.jpg')
+    # 生成封面图片（放在临时目录）
+    cover_image = os.path.join(tmp_dir, 'cover.jpg')
     temp_frame = os.path.join(tmp_dir, 'temp_frame.jpg')
     if extract_video_frame(cover_video, 0.5, temp_frame):
         from PIL import Image
@@ -707,13 +708,15 @@ def generate_video_cover(video_list, output_dir, video_width, video_height, fps,
             os.remove(temp_frame)
         print(f"[DEBUG] 封面图片已保存: {cover_image}")
 
-    # 清理临时目录
-    try:
-        import shutil
-        if os.path.exists(tmp_dir):
-            shutil.rmtree(tmp_dir)
-    except:
-        pass
+    # 清理临时目录（但保留封面视频和图片以便后续使用）
+    # 注意：封面视频 cover_video 在 output_dir 中，临时文件在 tmp_dir 中
+    # 如果不需要保留中间文件，可以取消下面的注释
+    # try:
+    #     import shutil
+    #     if os.path.exists(tmp_dir):
+    #         shutil.rmtree(tmp_dir)
+    # except:
+    #     pass
 
     print(f"[DEBUG] 4宫格封面视频已创建: {cover_video}")
     return cover_image, cover_video
